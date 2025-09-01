@@ -168,6 +168,8 @@ impl App {
                     if let Err(e) = self.database.update_todo(todo.id, new_title, new_description) {
                         return Err(format!("Failed to update todo: {}", e));
                     } else {
+                        // Force a checkpoint to ensure changes are written to disk immediately
+                        let _ = self.database.checkpoint();
                         let _ = self.refresh_todos();
                     }
                 }
