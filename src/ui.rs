@@ -64,6 +64,7 @@ pub struct App {
     pub create_field_focus: CreateFieldFocus,
     pub use_tree_view: bool,
     pub glow_pending: Option<Todo>,
+    pub search_input_mode: bool,
 }
 
 impl App {
@@ -234,6 +235,7 @@ impl App {
             create_field_focus: CreateFieldFocus::Title,
             use_tree_view: true,
             glow_pending: None,
+            search_input_mode: false,
         };
         app.refresh_todos()?;
         if !app.incomplete_todos.is_empty() {
@@ -408,6 +410,7 @@ impl App {
                 self.search_query.clear();
                 self.search_results.clear();
                 self.search_list_state.select(None);
+                self.search_input_mode = true;
             }
             KeyCode::Char('c') => {
                 if self.mode == AppMode::CompletedView {
@@ -423,6 +426,7 @@ impl App {
                 // Tree Search: live highlighting in tree view
                 self.mode = AppMode::TreeSearch;
                 self.search_query.clear();
+                self.search_input_mode = true;
             }
             KeyCode::Char('n') => {
                 self.mode = AppMode::Create;
@@ -810,24 +814,58 @@ impl App {
                 self.mode = AppMode::List;
                 self.search_query.clear();
                 self.search_results.clear();
+                self.search_input_mode = false;
             }
             KeyCode::Enter => {
-                // If there's a selected result, view/edit it with glow
-                if let Some(selected) = self.search_list_state.selected() {
-                    if let Some(todo) = self.search_results.get(selected) {
-                        self.glow_pending = Some(todo.clone());
+                if self.search_input_mode {
+                    // Finish input mode, enable navigation
+                    self.search_input_mode = false;
+                    self.update_search_results()?;
+                } else {
+                    // If there's a selected result, view/edit it with glow
+                    if let Some(selected) = self.search_list_state.selected() {
+                        if let Some(todo) = self.search_results.get(selected) {
+                            self.glow_pending = Some(todo.clone());
+                        }
                     }
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => self.next_search_result(),
-            KeyCode::Up | KeyCode::Char('k') => self.previous_search_result(),
-            KeyCode::Char(c) => {
-                self.search_query.push(c);
-                self.update_search_results()?;
-            }
             KeyCode::Backspace => {
-                self.search_query.pop();
-                self.update_search_results()?;
+                if self.search_input_mode {
+                    self.search_query.pop();
+                    self.update_search_results()?;
+                }
+            }
+            KeyCode::Char(c) => {
+                if self.search_input_mode {
+                    // In input mode, all characters go to search
+                    self.search_query.push(c);
+                    self.update_search_results()?;
+                } else {
+                    // In navigation mode, handle navigation keys
+                    match c {
+                        'j' => self.next_search_result(),
+                        'k' => self.previous_search_result(),
+                        _ => {
+                            // Any other character goes to search input when not in input mode
+                            // Re-enter input mode
+                            self.search_input_mode = true;
+                            self.search_query.push(c);
+                            self.update_search_results()?;
+                        }
+                    }
+                }
+            }
+            // Arrow keys always work for navigation regardless of mode
+            KeyCode::Down => {
+                if !self.search_input_mode {
+                    self.next_search_result();
+                }
+            }
+            KeyCode::Up => {
+                if !self.search_input_mode {
+                    self.previous_search_result();
+                }
             }
             _ => {}
         }
@@ -840,51 +878,164 @@ impl App {
                 self.mode = AppMode::List;
                 self.search_query.clear();
                 self.search_matches.clear();
+                self.search_input_mode = false;
             }
             KeyCode::Enter => {
-                // If there's a selected todo in tree, view/edit it with glow
-                if let Some(todo) = self.get_selected_todo() {
-                    self.glow_pending = Some(todo.clone());
-                }
-            }
-            // Only arrow keys for navigation during search
-            KeyCode::Down => {
-                if self.use_tree_view {
-                    self.next_tree_item();
+                if self.search_input_mode {
+                    // Finish input mode, enable navigation
+                    self.search_input_mode = false;
+                    self.update_tree_search_matches()?;
                 } else {
-                    self.next_todo();
-                }
-            }
-            KeyCode::Up => {
-                if self.use_tree_view {
-                    self.previous_tree_item();
-                } else {
-                    self.previous_todo();
-                }
-            }
-            // Special keys that should NOT be added to search
-            KeyCode::Tab => {
-                // Allow tree expansion/collapse during search with Tab key
-                if self.use_tree_view {
-                    if let Some(selected) = self.tree_list_state.selected() {
-                        if let Some(line) = self.tree_manager.get_rendered_lines().get(selected) {
-                            if line.has_children {
-                                self.tree_manager.toggle_expansion(line.todo_id);
-                                self.update_tree_search_matches()?;
-                                self.update_tree_selection_after_toggle(selected);
-                            }
-                        }
+                    // If there's a selected todo in tree, view/edit it with glow
+                    if let Some(todo) = self.get_selected_todo() {
+                        self.glow_pending = Some(todo.clone());
                     }
                 }
             }
             KeyCode::Backspace => {
-                self.search_query.pop();
-                self.update_tree_search_matches()?;
+                if self.search_input_mode {
+                    self.search_query.pop();
+                    self.update_tree_search_matches()?;
+                }
             }
-            // ALL printable characters (including j, k, h, l, t, etc.) go to search
             KeyCode::Char(c) => {
-                self.search_query.push(c);
-                self.update_tree_search_matches()?;
+                if self.search_input_mode {
+                    // In input mode, all characters go to search
+                    self.search_query.push(c);
+                    self.update_tree_search_matches()?;
+                } else {
+                    // In navigation mode, handle navigation keys
+                    match c {
+                        'j' => {
+                            if self.use_tree_view {
+                                self.next_tree_item();
+                            } else {
+                                self.next_todo();
+                            }
+                        }
+                        'k' => {
+                            if self.use_tree_view {
+                                self.previous_tree_item();
+                            } else {
+                                self.previous_todo();
+                            }
+                        }
+                        'h' => {
+                            if self.current_parent.is_some() {
+                                self.current_parent = None;
+                                self.refresh_todos()?;
+                                self.update_tree_search_matches()?;
+                                if !self.incomplete_todos.is_empty() {
+                                    self.list_state.select(Some(0));
+                                    if self.use_tree_view {
+                                        self.tree_list_state.select(Some(0));
+                                    }
+                                }
+                            }
+                        }
+                        'l' => {
+                            if let Some(todo) = self.get_selected_todo() {
+                                self.current_parent = Some(todo.id);
+                                self.refresh_todos()?;
+                                self.update_tree_search_matches()?;
+                                if !self.incomplete_todos.is_empty() {
+                                    self.list_state.select(Some(0));
+                                    if self.use_tree_view {
+                                        self.tree_list_state.select(Some(0));
+                                    }
+                                }
+                            }
+                        }
+                        't' => {
+                            // Allow tree expansion/collapse during search with 't' key
+                            if self.use_tree_view {
+                                if let Some(selected) = self.tree_list_state.selected() {
+                                    if let Some(line) = self.tree_manager.get_rendered_lines().get(selected) {
+                                        if line.has_children {
+                                            self.tree_manager.toggle_expansion(line.todo_id);
+                                            self.update_tree_selection_after_toggle(selected);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ' ' => {
+                            // Allow toggling completion during search
+                            if let Some(todo) = self.get_selected_todo() {
+                                let todo_id = todo.id;
+                                let is_currently_completed = todo.is_completed();
+                                
+                                if is_currently_completed {
+                                    self.database.uncomplete_todo(todo_id)?;
+                                } else {
+                                    self.database.complete_todo(todo_id)?;
+                                }
+                                
+                                if self.use_tree_view {
+                                    self.tree_manager.update_todo_completion(todo_id, !is_currently_completed);
+                                }
+                                
+                                self.refresh_todos()?;
+                                self.update_selection_after_refresh();
+                                self.update_tree_search_matches()?;
+                            }
+                        }
+                        _ => {
+                            // Any other character goes to search input when not in input mode
+                            // Re-enter input mode
+                            self.search_input_mode = true;
+                            self.search_query.push(c);
+                            self.update_tree_search_matches()?;
+                        }
+                    }
+                }
+            }
+            // Arrow keys always work for navigation regardless of mode
+            KeyCode::Down => {
+                if !self.search_input_mode {
+                    if self.use_tree_view {
+                        self.next_tree_item();
+                    } else {
+                        self.next_todo();
+                    }
+                }
+            }
+            KeyCode::Up => {
+                if !self.search_input_mode {
+                    if self.use_tree_view {
+                        self.previous_tree_item();
+                    } else {
+                        self.previous_todo();
+                    }
+                }
+            }
+            KeyCode::Left => {
+                if !self.search_input_mode && self.current_parent.is_some() {
+                    self.current_parent = None;
+                    self.refresh_todos()?;
+                    self.update_tree_search_matches()?;
+                    if !self.incomplete_todos.is_empty() {
+                        self.list_state.select(Some(0));
+                        if self.use_tree_view {
+                            self.tree_list_state.select(Some(0));
+                        }
+                    }
+                }
+            }
+            KeyCode::Right => {
+                if !self.search_input_mode {
+                    if let Some(todo) = self.get_selected_todo() {
+                        self.current_parent = Some(todo.id);
+                        self.refresh_todos()?;
+                        self.update_tree_search_matches()?;
+                        if !self.incomplete_todos.is_empty() {
+                            self.list_state.select(Some(0));
+                            if self.use_tree_view {
+                                self.tree_list_state.select(Some(0));
+                            }
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -972,6 +1123,7 @@ impl App {
         }
         Ok(())
     }
+
 
     pub fn draw(&mut self, f: &mut Frame) {
         let chunks = Layout::default()
@@ -1546,6 +1698,7 @@ impl App {
         f.render_stateful_widget(list, chunks[1], &mut self.search_list_state);
     }
 
+
     fn draw_help(&self, f: &mut Frame, area: Rect) {
         let help_text = match self.mode {
             AppMode::List => {
@@ -1555,13 +1708,25 @@ impl App {
                     "/: Tree Search | f: List Find | n: New | c: Show Completed | Enter: View/Edit | d: Delete | Space: Toggle Completion | h/l: Navigate | q: Quit"
                 }
             }
-            AppMode::TreeSearch => "Type to search tree | Tab: Expand/Collapse | Enter: View/Edit | ↑/↓: Navigate | Esc: Back",
+            AppMode::TreeSearch => {
+                if self.search_input_mode {
+                    "Type to search | Enter: Finish input & navigate | Esc: Cancel"
+                } else {
+                    "hjkl/arrows: Navigate | t: Expand/Collapse | Space: Toggle | Enter: View/Edit | Esc: Back"
+                }
+            }
             AppMode::CompletedView => "Enter: View/Edit | Space: Uncomplete | j/k: Navigate | c: Back to List | q/Esc: Back",
             AppMode::View => "e: Edit | q/Esc: Back",
             AppMode::Edit => "Enter: Save | Esc: Cancel",
             AppMode::Create => "Tab: Next Field | Enter: Save | Esc: Cancel",
             AppMode::ConfirmDelete => "y: Yes | n/Esc: No",
-            AppMode::ListFind => "Type to search all | Enter: View/Edit | j/k: Navigate | Esc: Back",
+            AppMode::ListFind => {
+                if self.search_input_mode {
+                    "Type to search | Enter: Finish input & navigate | Esc: Cancel"
+                } else {
+                    "hjkl/arrows: Navigate | Enter: View/Edit | Esc: Back"
+                }
+            }
             AppMode::ParentSearch => "Type to search | Enter: Select Parent | j/k: Navigate | Esc: Back",
         };
 
