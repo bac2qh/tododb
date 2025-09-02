@@ -5,7 +5,7 @@ A terminal-based todo application built with Rust, featuring a tree-structured t
 ## Demo
 
 <video width="600" controls>
-  <source src="https://github.com/bac2qh/tododb/raw/main/demo.mov" type="video/mp4">
+  <source src="https://github.com/bac2qh/tododb/raw/main/demo.mp4" type="video/mp4">
 </video>
 
 ## Features
