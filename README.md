@@ -105,4 +105,4 @@ All pull requests require approval before merging to main.
 
 ## License
 
-Open source project - check repository for license details.
+MIT License - see [LICENSE](LICENSE) file for details.
