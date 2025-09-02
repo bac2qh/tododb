@@ -1,6 +1,6 @@
 # TodoDB
 
-A terminal-based todo application built with Rust, featuring a tree-structured task organization, SQLite database backend, and integrated markdown editing with clickable links.
+A terminal-based todo application built with Rust, featuring hierarchical task organization, SQLite backend, and integrated markdown editing with clickable links.
 
 ## Demo
 
@@ -9,178 +9,100 @@ A terminal-based todo application built with Rust, featuring a tree-structured t
 ## Features
 
 - **Terminal UI**: Clean, interactive interface using ratatui
-- **Glow Integration**: View and edit todos in full markdown with clickable hyperlinks
-- **Tree Structure**: Organize todos in a hierarchical tree format  
-- **SQLite Database**: Persistent storage with WAL mode for performance
-- **Search Functionality**: Real-time search with regex support
+- **Tree Structure**: Hierarchical todo organization with move functionality
+- **Glow Integration**: Rich markdown editing with clickable hyperlinks
+- **SQLite Database**: Persistent storage with WAL mode
+- **Search**: Real-time search with regex support
 - **Color Themes**: Catppuccin Frappe color scheme
-- **Persistent Files**: Markdown files saved in `markdowns/` directory
-- **Test Mode**: Built-in functionality testing
 
-## Installation
+## Quick Start
 
 ### Prerequisites
+- Rust (latest stable)
+- **glow** - `brew install glow` or [install guide](https://github.com/charmbracelet/glow#installation)
 
-- Rust (latest stable version)
-- Cargo  
-- **glow** (for markdown viewing) - install via `brew install glow` or see [glow installation](https://github.com/charmbracelet/glow#installation)
-
-### Install from Source
-
+### Installation
 ```bash
 git clone https://github.com/bac2qh/tododb.git
 cd tododb
 cargo install --path .
 ```
 
-This installs `tododb` to your system PATH, making it available from anywhere.
-
-### Build from Source (Development)
-
+### Usage
 ```bash
-git clone https://github.com/bac2qh/tododb.git
-cd tododb  
-cargo build --release
+tododb                    # Run the app
+tododb --demo            # Try with demo data (separate DB)
+tododb --test            # Run functionality tests
 ```
-
-## Usage
-
-### Basic Usage
-
-```bash
-# Run TodoDB (after installation)
-tododb
-
-# Or run with cargo (development)
-cargo run
-```
-
-The database is automatically created at `~/.local/share/tododb/todos.db`.
-
-### Key Bindings
-
-- **Enter**: View/edit todo in glow (full markdown with clickable links)
-- **Space**: Toggle todo completion status
-- **n**: Create new todo
-- **c**: Show/hide completed todos
-- **d**: Delete selected todo
-- **f**: Search all todos (flat view)
-- **/**: Search in tree view
-- **t**: Expand/collapse tree nodes
-- **j/k** or **↑/↓**: Navigate todos
-- **h/l** or **←/→**: Navigate hierarchy levels
-- **q**: Quit application
-
-### Markdown Support
-
-TodoDB integrates with **glow** to provide rich markdown viewing and editing:
-
-- **Clickable hyperlinks**: Links in todo descriptions are fully clickable
-- **Rich formatting**: Full markdown rendering with syntax highlighting
-- **Edit in place**: Changes made in glow automatically sync back to database
-- **Persistent files**: Markdown files are saved in `markdowns/` directory as `{id}_{title}.md`
-
-### Demo Mode
-
-To quickly populate your database with realistic sample data for demonstration purposes:
-
-```bash
-# Create comprehensive demo data
-tododb --demo
-
-# Or with cargo (development)
-cargo run -- --demo
-```
-
-This creates a rich dataset including:
-- **3 Major Projects:** Web development, mobile app, and DevOps infrastructure
-- **Hierarchical Task Structure:** Projects with subtasks and detailed descriptions
-- **Markdown Content:** Rich formatting with links, code blocks, and documentation
-- **Mixed Completion Status:** Both completed and pending tasks to showcase all features
-- **Personal Development:** Learning goals, health routines, and financial planning
-- **Professional Content:** Real-world scenarios for software development workflows
-
-Perfect for:
-- **Screen recordings** and app demonstrations
-- **Feature showcasing** during presentations  
-- **Testing** the full application workflow
-- **Learning** how to structure complex projects
-
-### Test Modes
-
-```bash
-# Run functionality tests
-tododb --test
-
-# Run tree functionality tests
-tododb --tree-test
-
-# Or with cargo (development)
-cargo run -- --test
-cargo run -- --tree-test
-```
-
-## Dependencies
-
-- **rusqlite**: SQLite database interface with bundled SQLite and chrono support
-- **ratatui**: Terminal user interface library
-- **crossterm**: Cross-platform terminal manipulation
-- **chrono**: Date and time handling
-- **anyhow**: Error handling
-- **regex**: Regular expression support
-- **tokio**: Async runtime (full features)
-- **serde**: Serialization framework
-
-## Architecture
-
-The application is structured into several modules:
-
-- `main.rs`: Entry point and UI initialization
-- `database.rs`: SQLite database operations and schema management
-- `ui.rs`: Terminal user interface implementation with glow integration
-- `tree.rs`: Tree data structure for hierarchical todo organization
-- `markdown.rs`: Markdown rendering and syntax highlighting
-- `colors.rs`: Color scheme definitions (Catppuccin Frappe)
-- `test.rs`: Functionality testing suite
-- `tree_test.rs`: Tree-specific testing
-
-## Database
-
-The application uses SQLite with WAL (Write-Ahead Logging) mode for:
-- Better performance for concurrent operations
-- Crash safety  
-- Reduced locking contention
 
 Database location: `~/.local/share/tododb/todos.db`
 
-## Glow Integration
+## Key Bindings
 
-TodoDB integrates seamlessly with [glow](https://github.com/charmbracelet/glow) for enhanced markdown viewing and editing:
+### Navigation & Selection
+- **j/k** or **↑/↓**: Navigate todos
+- **h/l** or **←/→**: Navigate hierarchy levels
+- **Enter**: View/edit todo in glow markdown editor
 
-### How it Works
-1. Press **Enter** on any todo to open it in glow
-2. TodoDB suspends its interface and launches glow in TUI mode
-3. Edit your todo content with full markdown support and clickable links
-4. Exit glow (press `q`) to return to TodoDB
-5. Changes are automatically synchronized back to the database
+### Todo Management
+- **n**: Create new todo
+- **m**: Move todo (tree view only) - select new parent with j/k, Enter to confirm
+- **Space**: Toggle completion status
+- **d**: Delete selected todo
+- **c**: Show/hide completed todos
 
-### Markdown Files
-- Stored in `markdowns/` directory with format: `{id}_{title}.md`
-- Contains structured sections: Title, Description, and Metadata
-- Persistent files allow external editing and version control
-- Bidirectional sync ensures database stays updated
-- **Cleanup**: Remove old files with `rm markdowns/*.md` when needed (keep the folder)
+### Tree & Search
+- **t**: Expand/collapse tree nodes
+- **f**: Search all todos (flat view)
+- **/**: Search in tree view (live highlighting)
+
+### Other
+- **q**: Quit application
+- **Esc**: Cancel current operation
+
+## Move Functionality
+
+Press **m** on any todo in tree view to reorganize your tasks:
+- **Current parent automatically highlighted**
+- **Green highlighting** shows valid parent candidates
+- **Yellow highlighting** shows the todo being moved
+- **j/k** to navigate between valid parents
+- **Enter** to confirm move, **Esc** to cancel
+- **Prevents circular dependencies** automatically
+
+## Markdown Integration
+
+TodoDB integrates with [glow](https://github.com/charmbracelet/glow) for rich markdown editing:
+
+- Press **Enter** on any todo to open in glow editor
+- Full markdown support with clickable links
+- Changes automatically sync back to database
+- Files saved in `markdowns/` directory as `{id}_{title}.md`
+
+## Demo Mode
+
+Create sample data for testing (uses separate `demo_todos.db`):
+```bash
+tododb --demo
+```
+
+Includes hierarchical projects, markdown content, and mixed completion status.
+
+## Architecture
+
+- **SQLite** with WAL mode for performance and safety
+- **Tree structure** for hierarchical organization
+- **Markdown files** for rich content editing
+- **Terminal UI** with ratatui and crossterm
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+3. Submit a pull request
 
 All pull requests require approval before merging to main.
 
 ## License
 
-This project is open source. Please check the repository for license details.
+Open source project - check repository for license details.
