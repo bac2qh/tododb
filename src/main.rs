@@ -36,8 +36,8 @@ fn main() -> anyhow::Result<()> {
                         (args.len() > 2 && args[2] == "--demo");
     
     if has_demo_flag {
-        let db_path = get_db_path(&args)?;
-        let database = Database::new(&db_path)?;
+        let demo_db_path = get_demo_db_path()?;
+        let database = Database::new(&demo_db_path)?;
         let generator = DemoDataGenerator::new(database);
         return generator.populate_demo_data();
     }
@@ -107,6 +107,11 @@ fn run_app<B: ratatui::backend::Backend + std::io::Write>(
         }
     }
     Ok(())
+}
+
+fn get_demo_db_path() -> anyhow::Result<String> {
+    // Always use demo_todos.db in the current directory for demo mode
+    Ok("demo_todos.db".to_string())
 }
 
 fn get_db_path(args: &[String]) -> anyhow::Result<String> {
