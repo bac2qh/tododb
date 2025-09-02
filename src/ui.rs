@@ -24,6 +24,7 @@ pub enum AppMode {
     ListFind,
     TreeSearch,
     ParentSearch,
+    Move,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,6 +66,7 @@ pub struct App {
     pub use_tree_view: bool,
     pub glow_pending: Option<Todo>,
     pub search_input_mode: bool,
+    pub move_todo_id: Option<i64>,
 }
 
 impl App {
@@ -238,6 +240,7 @@ impl App {
             use_tree_view: true,
             glow_pending: None,
             search_input_mode: false,
+            move_todo_id: None,
         };
         app.refresh_todos()?;
         if !app.incomplete_todos.is_empty() {
@@ -379,6 +382,7 @@ impl App {
             AppMode::ListFind => self.handle_list_find_key(key)?,
             AppMode::TreeSearch => self.handle_tree_search_key(key)?,
             AppMode::ParentSearch => self.handle_parent_search_key(key)?,
+            AppMode::Move => self.handle_move_key(key)?,
         }
         Ok(())
     }
@@ -441,6 +445,16 @@ impl App {
             KeyCode::Char('d') => {
                 if self.get_current_list_state().selected().is_some() {
                     self.mode = AppMode::ConfirmDelete;
+                }
+            }
+            KeyCode::Char('m') => {
+                if self.use_tree_view {
+                    if let Some(todo) = self.get_selected_todo() {
+                        self.move_todo_id = Some(todo.id);
+                        self.mode = AppMode::Move;
+                        // Find and highlight the current parent (or first valid parent if root)
+                        self.highlight_current_parent_for_move();
+                    }
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
@@ -1126,6 +1140,190 @@ impl App {
         Ok(())
     }
 
+    fn handle_move_key(&mut self, key: KeyCode) -> anyhow::Result<()> {
+        match key {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = AppMode::List;
+                self.move_todo_id = None;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                // Move to next valid parent candidate in tree
+                self.move_to_next_valid_parent();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                // Move to previous valid parent candidate in tree
+                self.move_to_previous_valid_parent();
+            }
+            KeyCode::Enter => {
+                if let Some(move_todo_id) = self.move_todo_id {
+                    if let Some(highlighted_todo) = self.get_selected_todo() {
+                        let new_parent_id = Some(highlighted_todo.id);
+                        
+                        // Check if highlighting root/no parent position
+                        let new_parent_id = if self.is_highlighting_root_position() {
+                            None
+                        } else {
+                            new_parent_id
+                        };
+                        
+                        match self.database.move_todo(move_todo_id, new_parent_id) {
+                            Ok(()) => {
+                                self.refresh_todos()?;
+                                self.tree_manager.rebuild_from_todos(self.incomplete_todos.clone());
+                                self.mode = AppMode::List;
+                                self.move_todo_id = None;
+                            }
+                            Err(e) => {
+                                self.error_message = Some(format!("Cannot move todo: {}", e));
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn highlight_current_parent_for_move(&mut self) {
+        if let Some(move_todo_id) = self.move_todo_id {
+            // Find the todo being moved
+            if let Some(todo) = self.incomplete_todos.iter().find(|t| t.id == move_todo_id) {
+                if let Some(parent_id) = todo.parent_id {
+                    // Find the parent in the tree and highlight it
+                    if let Some(parent_index) = self.find_todo_index_in_tree(parent_id) {
+                        self.tree_list_state.select(Some(parent_index));
+                        return;
+                    }
+                }
+            }
+            // If no parent or parent not found, highlight the first valid candidate
+            self.move_to_first_valid_parent();
+        }
+    }
+
+    fn move_to_next_valid_parent(&mut self) {
+        let rendered_lines = self.tree_manager.get_rendered_lines();
+        if let Some(current_selection) = self.tree_list_state.selected() {
+            let mut next_index = (current_selection + 1) % rendered_lines.len();
+            
+            // Find next valid parent candidate
+            while !self.is_valid_parent_candidate_at_index(next_index) {
+                next_index = (next_index + 1) % rendered_lines.len();
+                if next_index == current_selection {
+                    break; // Avoid infinite loop
+                }
+            }
+            
+            self.tree_list_state.select(Some(next_index));
+        }
+    }
+
+    fn move_to_previous_valid_parent(&mut self) {
+        let rendered_lines = self.tree_manager.get_rendered_lines();
+        if let Some(current_selection) = self.tree_list_state.selected() {
+            let mut prev_index = if current_selection == 0 {
+                rendered_lines.len() - 1
+            } else {
+                current_selection - 1
+            };
+            
+            // Find previous valid parent candidate
+            while !self.is_valid_parent_candidate_at_index(prev_index) {
+                prev_index = if prev_index == 0 {
+                    rendered_lines.len() - 1
+                } else {
+                    prev_index - 1
+                };
+                if prev_index == current_selection {
+                    break; // Avoid infinite loop
+                }
+            }
+            
+            self.tree_list_state.select(Some(prev_index));
+        }
+    }
+
+    fn move_to_first_valid_parent(&mut self) {
+        let rendered_lines = self.tree_manager.get_rendered_lines();
+        for (index, _) in rendered_lines.iter().enumerate() {
+            if self.is_valid_parent_candidate_at_index(index) {
+                self.tree_list_state.select(Some(index));
+                return;
+            }
+        }
+    }
+
+    fn is_valid_parent_candidate_at_index(&self, index: usize) -> bool {
+        if let Some(move_todo_id) = self.move_todo_id {
+            let rendered_lines = self.tree_manager.get_rendered_lines();
+            if index < rendered_lines.len() {
+                let line = &rendered_lines[index];
+                let todo_id = line.todo_id;
+                
+                // Cannot move to itself or its descendants
+                return todo_id != move_todo_id && !self.is_descendant_of(todo_id, move_todo_id);
+            }
+        }
+        false
+    }
+
+    fn is_highlighting_root_position(&self) -> bool {
+        // For simplicity, we'll handle root moves differently
+        // This could be enhanced to have a special root indicator
+        false
+    }
+
+    fn find_todo_index_in_tree(&self, todo_id: i64) -> Option<usize> {
+        let rendered_lines = self.tree_manager.get_rendered_lines();
+        for (index, line) in rendered_lines.iter().enumerate() {
+            if line.todo_id == todo_id {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    fn is_descendant_of(&self, potential_descendant: i64, ancestor: i64) -> bool {
+        // Check if potential_descendant is a descendant of ancestor
+        for todo in &self.incomplete_todos {
+            if todo.id == potential_descendant {
+                let mut current_parent = todo.parent_id;
+                while let Some(parent_id) = current_parent {
+                    if parent_id == ancestor {
+                        return true;
+                    }
+                    // Find the parent todo
+                    if let Some(parent_todo) = self.incomplete_todos.iter().find(|t| t.id == parent_id) {
+                        current_parent = parent_todo.parent_id;
+                    } else {
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        false
+    }
+
+    fn get_todo_depth(&self, todo_id: i64) -> usize {
+        let mut depth = 0;
+        for todo in &self.incomplete_todos {
+            if todo.id == todo_id {
+                let mut current_parent = todo.parent_id;
+                while let Some(parent_id) = current_parent {
+                    depth += 1;
+                    if let Some(parent_todo) = self.incomplete_todos.iter().find(|t| t.id == parent_id) {
+                        current_parent = parent_todo.parent_id;
+                    } else {
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        depth
+    }
 
     pub fn draw(&mut self, f: &mut Frame) {
         let chunks = Layout::default()
@@ -1155,6 +1353,14 @@ impl App {
             AppMode::ConfirmDelete => self.draw_confirm_delete(f, chunks[0]),
             AppMode::ListFind => self.draw_list_find_mode(f, chunks[0]),
             AppMode::ParentSearch => self.draw_parent_search_mode(f, chunks[0]),
+            AppMode::Move => {
+                // In move mode, just draw the tree view with special highlighting
+                if self.use_tree_view {
+                    self.draw_tree_view(f, chunks[0]);
+                } else {
+                    self.draw_split_todo_lists(f, chunks[0]);
+                }
+            }
         }
 
         self.draw_help(f, chunks[1]);
@@ -1215,7 +1421,8 @@ impl App {
         
         let items: Vec<ListItem> = rendered_lines
             .iter()
-            .map(|line| {
+            .enumerate()
+            .map(|(index, line)| {
                 if let Some(todo) = self.tree_manager.get_todo_by_id(line.todo_id) {
                     let created_time = todo.created_at.with_timezone(&Local).format("%m/%d %H:%M").to_string();
                     
@@ -1225,10 +1432,23 @@ impl App {
                             Style::default().fg(CatppuccinFrappe::SURFACE2)
                         )
                     } else {
-                        (
-                            Style::default().fg(CatppuccinFrappe::INCOMPLETE),
-                            Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR)
-                        )
+                        // In move mode, highlight valid parent candidates differently
+                        if self.mode == AppMode::Move && self.is_valid_parent_candidate_at_index(index) {
+                            (
+                                Style::default().fg(CatppuccinFrappe::GREEN), // Green for valid move targets
+                                Style::default().fg(CatppuccinFrappe::GREEN)
+                            )
+                        } else if self.mode == AppMode::Move && Some(todo.id) == self.move_todo_id {
+                            (
+                                Style::default().fg(CatppuccinFrappe::YELLOW), // Yellow for item being moved
+                                Style::default().fg(CatppuccinFrappe::YELLOW)
+                            )
+                        } else {
+                            (
+                                Style::default().fg(CatppuccinFrappe::INCOMPLETE),
+                                Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR)
+                            )
+                        }
                     };
 
                     ListItem::new(Line::from(vec![
@@ -1246,7 +1466,19 @@ impl App {
             })
             .collect();
 
-        let title = "Todo Tree View (All Items)";
+        let title = if self.mode == AppMode::Move {
+            if let Some(move_todo_id) = self.move_todo_id {
+                if let Some(todo) = self.incomplete_todos.iter().find(|t| t.id == move_todo_id) {
+                    format!("Move '{}' - Green=Valid Parents, j/k=Navigate, Enter=Confirm", todo.title)
+                } else {
+                    "Move Mode - Green=Valid Parents, j/k=Navigate, Enter=Confirm".to_string()
+                }
+            } else {
+                "Move Mode - Green=Valid Parents, j/k=Navigate, Enter=Confirm".to_string()
+            }
+        } else {
+            "Todo Tree View (All Items)".to_string()
+        };
         let list = List::new(items)
             .block(Block::default()
                 .borders(Borders::ALL)
@@ -1705,9 +1937,9 @@ impl App {
         let help_text = match self.mode {
             AppMode::List => {
                 if self.use_tree_view {
-                    "/: Tree Search | f: List Find | n: New | t: Expand/Collapse | c: Show Completed | Enter: View/Edit | d: Delete | Space: Toggle Completion | h/l: Navigate | q: Quit"
+                    "/: Tree Search | f: List Find | n: New | t: Expand/Collapse | c: Show Completed | m: Move | Enter: View/Edit | d: Delete | Space: Toggle Completion | h/l: Navigate | q: Quit"
                 } else {
-                    "/: Tree Search | f: List Find | n: New | c: Show Completed | Enter: View/Edit | d: Delete | Space: Toggle Completion | h/l: Navigate | q: Quit"
+                    "/: Tree Search | f: List Find | n: New | c: Show Completed | m: Move | Enter: View/Edit | d: Delete | Space: Toggle Completion | h/l: Navigate | q: Quit"
                 }
             }
             AppMode::TreeSearch => {
@@ -1730,6 +1962,7 @@ impl App {
                 }
             }
             AppMode::ParentSearch => "Type to search | Enter: Select Parent | j/k: Navigate | Esc: Back",
+            AppMode::Move => "j/k: Navigate | Enter: Move to selected parent | Esc: Cancel",
         };
 
         let help = Paragraph::new(help_text)

@@ -196,6 +196,43 @@ impl Database {
         Ok(())
     }
 
+    pub fn move_todo(&self, id: i64, new_parent_id: Option<i64>) -> anyhow::Result<()> {
+        // Check if the new parent would create a cycle
+        if let Some(parent_id) = new_parent_id {
+            if self.would_create_cycle(id, parent_id)? {
+                return Err(anyhow::anyhow!("Cannot move todo: would create a cycle"));
+            }
+        }
+        
+        self.conn.execute(
+            "UPDATE todos SET parent_id = ?1 WHERE id = ?2",
+            params![new_parent_id, id],
+        )?;
+        Ok(())
+    }
+
+    fn would_create_cycle(&self, todo_id: i64, potential_parent_id: i64) -> anyhow::Result<bool> {
+        // If we're trying to make a todo its own parent, that's obviously a cycle
+        if todo_id == potential_parent_id {
+            return Ok(true);
+        }
+
+        // Walk up the parent chain of the potential parent to see if we encounter the todo we're trying to move
+        let mut current_id = Some(potential_parent_id);
+        while let Some(id) = current_id {
+            if let Some(todo) = self.get_todo_by_id(id)? {
+                current_id = todo.parent_id;
+                if current_id == Some(todo_id) {
+                    return Ok(true);
+                }
+            } else {
+                break;
+            }
+        }
+        
+        Ok(false)
+    }
+
     pub fn get_incomplete_todos(&self, parent_id: Option<i64>) -> anyhow::Result<Vec<Todo>> {
         let mut todos = Vec::new();
         
