@@ -437,10 +437,26 @@ impl App {
             KeyCode::Char('n') => {
                 self.mode = AppMode::Create;
                 self.input_title.clear();
-                self.input_parent.clear();
                 self.input_description.clear();
-                self.selected_parent_id = None;
                 self.create_field_focus = CreateFieldFocus::Title;
+                
+                // Auto-fill parent field with currently highlighted task
+                if let Some(selected_todo) = self.get_selected_todo() {
+                    let todo_id = selected_todo.id;
+                    let todo_title = selected_todo.title.clone();
+                    
+                    self.selected_parent_id = Some(todo_id);
+                    let parent_display = if todo_title.len() > 40 {
+                        format!("{}...", &todo_title[..37])
+                    } else {
+                        todo_title
+                    };
+                    self.input_parent = format!("ID:{} {}", todo_id, parent_display);
+                } else {
+                    // No selection, clear parent fields
+                    self.input_parent.clear();
+                    self.selected_parent_id = None;
+                }
             }
             KeyCode::Char('d') => {
                 if self.get_current_list_state().selected().is_some() {
@@ -685,11 +701,17 @@ impl App {
                         self.input_description.push(c);
                     }
                     CreateFieldFocus::Parent => {
-                        // Enter parent search mode when typing in parent field
-                        self.mode = AppMode::ParentSearch;
-                        self.search_query.clear();
-                        self.search_query.push(c);
-                        self.update_search_results()?;
+                        if c == 'r' {
+                            // Clear parent field on 'r' key
+                            self.input_parent.clear();
+                            self.selected_parent_id = None;
+                        } else {
+                            // Enter parent search mode when typing in parent field
+                            self.mode = AppMode::ParentSearch;
+                            self.search_query.clear();
+                            self.search_query.push(c);
+                            self.update_search_results()?;
+                        }
                     }
                 }
             }
@@ -1784,7 +1806,7 @@ impl App {
             Style::default().fg(CatppuccinFrappe::BORDER)
         };
         let parent_display = if self.input_parent.is_empty() {
-            "Press Tab to focus, type to search for parent...".to_string()
+            "Press Tab to focus, type to search for parent, 'r' to clear...".to_string()
         } else {
             self.input_parent.clone()
         };
@@ -1952,7 +1974,7 @@ impl App {
             AppMode::CompletedView => "Enter: View/Edit | Space: Uncomplete | j/k: Navigate | c: Back to List | q/Esc: Back",
             AppMode::View => "e: Edit | q/Esc: Back",
             AppMode::Edit => "Enter: Save | Esc: Cancel",
-            AppMode::Create => "Tab: Next Field | Enter: Save | Esc: Cancel",
+            AppMode::Create => "Tab: Next Field | r: Clear Parent | Enter: Save | Esc: Cancel",
             AppMode::ConfirmDelete => "y: Yes | n/Esc: No",
             AppMode::ListFind => {
                 if self.search_input_mode {
