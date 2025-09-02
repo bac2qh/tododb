@@ -2,6 +2,12 @@
 
 A terminal-based todo application built with Rust, featuring a tree-structured task organization, SQLite database backend, and integrated markdown editing with clickable links.
 
+## Demo
+
+<video width="600" controls>
+  <source src="https://github.com/bac2qh/tododb/raw/main/demo.mov" type="video/mp4">
+</video>
+
 ## Features
 
 - **Terminal UI**: Clean, interactive interface using ratatui
