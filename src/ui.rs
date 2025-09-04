@@ -64,9 +64,9 @@ pub struct App {
     pub selected_parent_id: Option<i64>,
     pub create_field_focus: CreateFieldFocus,
     pub use_tree_view: bool,
-    pub glow_pending: Option<Todo>,
     pub search_input_mode: bool,
     pub move_todo_id: Option<i64>,
+    pub editor_pending: Option<Todo>,
 }
 
 impl App {
@@ -111,7 +111,22 @@ impl App {
         Ok(file_path)
     }
     
-    pub fn launch_glow_editor<B: ratatui::backend::Backend + std::io::Write>(&mut self, todo: &Todo, terminal: &mut ratatui::Terminal<B>) -> Result<(), String> {
+    fn get_editor_command(&self) -> String {
+        std::env::var("EDITOR")
+            .or_else(|_| std::env::var("VISUAL"))
+            .unwrap_or_else(|_| {
+                // Fallback priority: vim -> nano -> vi
+                if std::process::Command::new("vim").arg("--version").output().is_ok() {
+                    "vim".to_string()
+                } else if std::process::Command::new("nano").arg("--version").output().is_ok() {
+                    "nano".to_string()
+                } else {
+                    "vi".to_string()
+                }
+            })
+    }
+
+    pub fn launch_editor<B: ratatui::backend::Backend + std::io::Write>(&mut self, todo: &Todo, terminal: &mut ratatui::Terminal<B>) -> Result<(), String> {
         use std::process::Command;
         use crossterm::{
             execute,
@@ -121,6 +136,7 @@ impl App {
         
         // Create the markdown file
         let file_path = self.create_markdown_file(todo)?;
+        
         
         // Suspend TUI - restore terminal to normal mode
         disable_raw_mode()
@@ -135,15 +151,17 @@ impl App {
         terminal.show_cursor()
             .map_err(|e| format!("Failed to show cursor: {}", e))?;
         
-        // Launch glow and WAIT for it to complete (foreground process)
-        let status = Command::new("glow")
-            .arg("--tui")  // Force TUI mode
+        // Get editor command
+        let editor_cmd = self.get_editor_command();
+        
+        // Launch editor and WAIT for it to complete (foreground process)
+        let status = Command::new(&editor_cmd)
             .arg(&file_path)
             .stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .status()
-            .map_err(|e| format!("Failed to launch glow (is it installed?): {}", e))?;
+            .map_err(|e| format!("Failed to launch editor '{}': {}", editor_cmd, e))?;
         
         // Restore TUI - re-enter alternate screen mode
         enable_raw_mode()
@@ -160,7 +178,7 @@ impl App {
             .map_err(|e| format!("Failed to clear terminal: {}", e))?;
         
         if !status.success() {
-            return Err("Glow exited with error".to_string());
+            return Err(format!("Editor '{}' exited with error", editor_cmd));
         }
         
         // Read back the edited content and update database
@@ -238,9 +256,9 @@ impl App {
             selected_parent_id: None,
             create_field_focus: CreateFieldFocus::Title,
             use_tree_view: true,
-            glow_pending: None,
             search_input_mode: false,
             move_todo_id: None,
+            editor_pending: None,
         };
         app.refresh_todos()?;
         if !app.incomplete_todos.is_empty() {
@@ -509,7 +527,7 @@ impl App {
             }
             KeyCode::Enter => {
                 if let Some(todo) = self.get_selected_todo() {
-                    self.glow_pending = Some(todo.clone());
+                    self.editor_pending = Some(todo.clone());
                 }
             }
             KeyCode::Right | KeyCode::Char('l') => {
@@ -549,7 +567,7 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => self.previous_todo(),
             KeyCode::Enter => {
                 if let Some(todo) = self.get_selected_todo() {
-                    self.glow_pending = Some(todo.clone());
+                    self.editor_pending = Some(todo.clone());
                 }
             }
             KeyCode::Char(' ') => {
@@ -860,10 +878,10 @@ impl App {
                     self.search_input_mode = false;
                     self.update_search_results()?;
                 } else {
-                    // If there's a selected result, view/edit it with glow
+                    // If there's a selected result, view/edit it with editor
                     if let Some(selected) = self.search_list_state.selected() {
                         if let Some(todo) = self.search_results.get(selected) {
-                            self.glow_pending = Some(todo.clone());
+                            self.editor_pending = Some(todo.clone());
                         }
                     }
                 }
@@ -924,9 +942,9 @@ impl App {
                     self.search_input_mode = false;
                     self.update_tree_search_matches()?;
                 } else {
-                    // If there's a selected todo in tree, view/edit it with glow
+                    // If there's a selected todo in tree, view/edit it with editor
                     if let Some(todo) = self.get_selected_todo() {
-                        self.glow_pending = Some(todo.clone());
+                        self.editor_pending = Some(todo.clone());
                     }
                 }
             }

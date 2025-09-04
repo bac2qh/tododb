@@ -88,10 +88,10 @@ fn run_app<B: ratatui::backend::Backend + std::io::Write>(
     app: &mut App,
 ) -> anyhow::Result<()> {
     loop {
-        // Check if glow should be launched
-        if let Some(todo) = app.glow_pending.take() {
-            if let Err(e) = app.launch_glow_editor(&todo, terminal) {
-                app.error_message = Some(format!("Glow error: {}", e));
+        // Check if editor should be launched
+        if let Some(todo) = app.editor_pending.take() {
+            if let Err(e) = app.launch_editor(&todo, terminal) {
+                app.error_message = Some(format!("Editor error: {}", e));
             }
         }
         
