@@ -1,6 +1,6 @@
 # TodoDB
 
-A terminal-based todo application built with Rust, featuring hierarchical task organization, SQLite backend, and integrated markdown editing with clickable links.
+A terminal-based todo application built with Rust, featuring hierarchical task organization, SQLite backend, and $EDITOR integration for seamless markdown editing.
 
 ## Demo
 
@@ -10,7 +10,7 @@ A terminal-based todo application built with Rust, featuring hierarchical task o
 
 - **Terminal UI**: Clean, interactive interface using ratatui
 - **Tree Structure**: Hierarchical todo organization with move functionality
-- **Glow Integration**: Rich markdown editing with clickable hyperlinks
+- **$EDITOR Integration**: Rich markdown editing with your preferred editor
 - **SQLite Database**: Persistent storage with WAL mode
 - **Search**: Real-time search with regex support
 - **Color Themes**: Catppuccin Frappe color scheme
@@ -18,8 +18,20 @@ A terminal-based todo application built with Rust, featuring hierarchical task o
 ## Quick Start
 
 ### Prerequisites
-- Rust (latest stable)
-- **glow** - `brew install glow` or [install guide](https://github.com/charmbracelet/glow#installation)
+- **Rust** (latest stable)
+- **Text Editor**: We recommend [Helix](https://helix-editor.com/) for the best experience:
+  ```bash
+  # Install Helix
+  brew install helix  # macOS
+  # or follow: https://docs.helix-editor.com/install.html
+  
+  # Set as default editor
+  export EDITOR=hx
+  ```
+  
+  **Why Helix?** When viewing markdown todos, use `gf` (goto file) to open URLs directly in your browser!
+  
+  Other editors work too - TodoDB uses `$EDITOR` → `$VISUAL` → `vim` → `nano` → `vi`
 
 ### Installation
 ```bash
@@ -42,7 +54,7 @@ Database location: `~/.local/share/tododb/todos.db`
 ### Navigation & Selection
 - **j/k** or **↑/↓**: Navigate todos
 - **h/l** or **←/→**: Navigate hierarchy levels
-- **Enter**: View/edit todo in glow markdown editor
+- **Enter**: View/edit todo in your $EDITOR
 
 ### Todo Management
 - **n**: Create new todo
@@ -70,14 +82,17 @@ Press **m** on any todo in tree view to reorganize your tasks:
 - **Enter** to confirm move, **Esc** to cancel
 - **Prevents circular dependencies** automatically
 
-## Markdown Integration
+## Editor Integration
 
-TodoDB integrates with [glow](https://github.com/charmbracelet/glow) for rich markdown editing:
+TodoDB seamlessly integrates with your preferred text editor:
 
-- Press **Enter** on any todo to open in glow editor
-- Full markdown support with clickable links
-- Changes automatically sync back to database
-- Files saved in `markdowns/` directory as `{id}_{title}.md`
+- Press **Enter** on any todo to open in your `$EDITOR`
+- Full markdown support with syntax highlighting
+- Changes automatically sync back to database when you save and exit
+- Temporary files created in `markdowns/` directory as `{id}_{title}.md`
+- **Pro tip**: Use Helix editor and press `gf` on URLs to open them in your browser!
+
+**Note**: Only title and description can be edited through markdown. Metadata like completion status, parent relationships, and creation dates must be managed through the TUI interface.
 
 ## Demo Mode
 
@@ -88,12 +103,19 @@ tododb --demo
 
 Includes hierarchical projects, markdown content, and mixed completion status.
 
-## Architecture
+## Development
 
+**Built with:**
+- **Rust** + **ratatui** for the terminal interface
+- **SQLite** with WAL mode for data storage
+- **Crossterm** for terminal handling
+- Developed and tested using **Ghostty** terminal emulator
+
+**Architecture:**
 - **SQLite** with WAL mode for performance and safety
-- **Tree structure** for hierarchical organization
-- **Markdown files** for rich content editing
-- **Terminal UI** with ratatui and crossterm
+- **Tree structure** for hierarchical organization  
+- **$EDITOR integration** for seamless markdown editing
+- **Terminal UI** with proper suspend/resume handling
 
 ## Contributing
 
