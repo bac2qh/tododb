@@ -6,6 +6,7 @@ pub struct TreeNode {
     pub id: i64,
     pub children: Vec<TreeNode>,
     pub is_expanded: bool,
+    pub has_incomplete_work: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -71,7 +72,11 @@ impl TodoTreeManager {
             for &child_id in child_ids {
                 if self.todos.contains_key(&child_id) {
                     let children = self.build_subtree(children_map, Some(child_id));
-                    let has_incomplete_children = self.has_incomplete_descendants(&children);
+                    
+                    // Calculate if this subtree has any incomplete work
+                    let todo = &self.todos[&child_id];
+                    let has_incomplete_work = !todo.is_completed() || 
+                        children.iter().any(|child| child.has_incomplete_work);
                     
                     // Determine expansion state based on rules:
                     // - Expand if any child is incomplete
@@ -79,12 +84,13 @@ impl TodoTreeManager {
                     // - Use saved state if exists, otherwise default based on children
                     let is_expanded = self.expansion_states.get(&child_id)
                         .copied()
-                        .unwrap_or(has_incomplete_children);
+                        .unwrap_or(has_incomplete_work);
                     
                     nodes.push(TreeNode {
                         id: child_id,
                         children,
                         is_expanded,
+                        has_incomplete_work,
                     });
                 }
             }
@@ -101,12 +107,8 @@ impl TodoTreeManager {
     }
 
     fn should_show_root_node(&self, node: &TreeNode) -> bool {
-        if let Some(todo) = self.todos.get(&node.id) {
-            // Show root if it's incomplete OR has incomplete descendants
-            !todo.is_completed() || self.has_incomplete_descendants(&node.children)
-        } else {
-            false
-        }
+        // Show root if it has any incomplete work in its subtree
+        node.has_incomplete_work
     }
 
     fn has_incomplete_descendants(&self, children: &[TreeNode]) -> bool {
@@ -168,8 +170,14 @@ impl TodoTreeManager {
             if !node.children.is_empty() && node.is_expanded {
                 ancestor_continuations.push(!is_last_sibling);
                 
-                for (i, child) in node.children.iter().enumerate() {
-                    let is_last_child = i == node.children.len() - 1;
+                // Filter children to only show those with incomplete work
+                let visible_children: Vec<&TreeNode> = node.children
+                    .iter()
+                    .filter(|child| child.has_incomplete_work)
+                    .collect();
+                
+                for (i, child) in visible_children.iter().enumerate() {
+                    let is_last_child = i == visible_children.len() - 1;
                     self.render_node(child, lines, ancestor_continuations.clone(), is_last_child, depth + 1);
                 }
                 
