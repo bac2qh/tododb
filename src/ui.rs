@@ -60,6 +60,9 @@ pub struct App {
     pub search_results: Vec<Todo>,
     pub search_list_state: ListState,
     pub search_matches: Vec<i64>,
+    pub current_match_index: Option<usize>,
+    pub search_opened_nodes: std::collections::HashSet<i64>,
+    pub pre_search_expansion_state: std::collections::HashMap<i64, bool>,
     pub input_parent: String,
     pub selected_parent_id: Option<i64>,
     pub create_field_focus: CreateFieldFocus,
@@ -252,6 +255,9 @@ impl App {
             search_results: Vec::new(),
             search_list_state: ListState::default(),
             search_matches: Vec::new(),
+            current_match_index: None,
+            search_opened_nodes: std::collections::HashSet::new(),
+            pre_search_expansion_state: std::collections::HashMap::new(),
             input_parent: String::new(),
             selected_parent_id: None,
             create_field_focus: CreateFieldFocus::Title,
@@ -308,13 +314,213 @@ impl App {
     fn update_tree_search_matches(&mut self) -> anyhow::Result<()> {
         if self.search_query.is_empty() {
             self.search_matches.clear();
+            self.current_match_index = None;
         } else {
-            self.search_matches = self.database.search_todos(&self.search_query)?
+            let new_matches: Vec<i64> = self.database.search_todos(&self.search_query)?
                 .into_iter()
                 .map(|todo| todo.id)
                 .collect();
+            
+            // Only re-sort if matches have actually changed
+            if new_matches != self.search_matches {
+                self.search_matches = new_matches;
+                // Sort matches by their appearance order in the tree
+                self.sort_matches_by_tree_order();
+                
+                // Find closest match to current selection or start from first match
+                self.current_match_index = if self.search_matches.is_empty() {
+                    None
+                } else {
+                    Some(self.find_closest_match_index())
+                };
+            }
         }
         Ok(())
+    }
+    
+    fn sort_matches_by_tree_order(&mut self) {
+        let rendered_lines = self.tree_manager.get_rendered_lines();
+        let line_order: std::collections::HashMap<i64, usize> = rendered_lines
+            .iter()
+            .enumerate()
+            .map(|(idx, line)| (line.todo_id, idx))
+            .collect();
+            
+        self.search_matches.sort_by_key(|&todo_id| {
+            line_order.get(&todo_id).copied().unwrap_or(usize::MAX)
+        });
+    }
+    
+    fn find_closest_match_index(&self) -> usize {
+        if self.search_matches.is_empty() {
+            return 0;
+        }
+        
+        let current_selection = self.tree_list_state.selected().unwrap_or(0);
+        let rendered_lines = self.tree_manager.get_rendered_lines();
+        
+        if let Some(current_line) = rendered_lines.get(current_selection) {
+            let current_todo_id = current_line.todo_id;
+            
+            // If current selection is a match, use it
+            if let Some(pos) = self.search_matches.iter().position(|&id| id == current_todo_id) {
+                return pos;
+            }
+        }
+        
+        // Otherwise, find the closest match by tree position
+        let line_positions: std::collections::HashMap<i64, usize> = rendered_lines
+            .iter()
+            .enumerate()
+            .map(|(idx, line)| (line.todo_id, idx))
+            .collect();
+            
+        let mut best_match = 0;
+        let mut best_distance = usize::MAX;
+        
+        for (idx, &match_id) in self.search_matches.iter().enumerate() {
+            if let Some(&match_pos) = line_positions.get(&match_id) {
+                let distance = if match_pos >= current_selection {
+                    match_pos - current_selection
+                } else {
+                    current_selection - match_pos
+                };
+                
+                if distance < best_distance {
+                    best_distance = distance;
+                    best_match = idx;
+                }
+            }
+        }
+        
+        best_match
+    }
+    
+    fn navigate_to_next_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        
+        let start_index = self.current_match_index.unwrap_or(0);
+        let matches_len = self.search_matches.len();
+        
+        // Try to find the next visible match, starting from the next position
+        for i in 1..=matches_len {
+            let next_index = (start_index + i) % matches_len;
+            
+            if let Some(&match_todo_id) = self.search_matches.get(next_index) {
+                // First check if it's already visible
+                if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
+                    self.current_match_index = Some(next_index);
+                    self.tree_list_state.select(Some(line_index));
+                    return;
+                }
+                
+                // If not visible, expand parent nodes to make it visible
+                let opened_nodes = self.expand_path_to_todo(match_todo_id);
+                if !opened_nodes.is_empty() {
+                    // Track which nodes we opened for search
+                    for node_id in opened_nodes {
+                        self.search_opened_nodes.insert(node_id);
+                    }
+                    
+                    // After expanding, it should be visible now
+                    if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
+                        self.current_match_index = Some(next_index);
+                        self.tree_list_state.select(Some(line_index));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    
+    fn navigate_to_previous_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        
+        let start_index = self.current_match_index.unwrap_or(0);
+        let matches_len = self.search_matches.len();
+        
+        // Try to find the previous visible match, starting from the previous position
+        for i in 1..=matches_len {
+            let prev_index = if start_index >= i {
+                start_index - i
+            } else {
+                matches_len - (i - start_index)
+            };
+            
+            if let Some(&match_todo_id) = self.search_matches.get(prev_index) {
+                // First check if it's already visible
+                if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
+                    self.current_match_index = Some(prev_index);
+                    self.tree_list_state.select(Some(line_index));
+                    return;
+                }
+                
+                // If not visible, expand parent nodes to make it visible
+                let opened_nodes = self.expand_path_to_todo(match_todo_id);
+                if !opened_nodes.is_empty() {
+                    // Track which nodes we opened for search
+                    for node_id in opened_nodes {
+                        self.search_opened_nodes.insert(node_id);
+                    }
+                    
+                    // After expanding, it should be visible now
+                    if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
+                        self.current_match_index = Some(prev_index);
+                        self.tree_list_state.select(Some(line_index));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    
+    fn navigate_to_current_match(&mut self) {
+        if let Some(match_index) = self.current_match_index {
+            if let Some(&match_todo_id) = self.search_matches.get(match_index) {
+                if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
+                    self.tree_list_state.select(Some(line_index));
+                }
+            }
+        }
+    }
+    
+    fn expand_path_to_todo(&mut self, todo_id: i64) -> Vec<i64> {
+        self.tree_manager.expand_path_to_todo(todo_id)
+    }
+    
+    fn restore_pre_search_expansion_state(&mut self) {
+        let mut needs_rebuild = false;
+        
+        // For each node we opened during search, restore its original state
+        for &node_id in &self.search_opened_nodes {
+            // Get the original state (default to false if it wasn't tracked)
+            let original_state = self.pre_search_expansion_state.get(&node_id).copied().unwrap_or(false);
+            let current_state = self.tree_manager.expansion_states.get(&node_id).copied().unwrap_or(false);
+            
+            // Only change if current state differs from original
+            if current_state != original_state {
+                if original_state {
+                    self.tree_manager.expansion_states.insert(node_id, true);
+                } else {
+                    self.tree_manager.expansion_states.remove(&node_id);
+                }
+                needs_rebuild = true;
+            }
+        }
+        
+        // Clear tracking data
+        self.search_opened_nodes.clear();
+        self.pre_search_expansion_state.clear();
+        
+        // Rebuild tree if we made changes
+        if needs_rebuild {
+            let all_todos = self.tree_manager.todos.values().cloned().collect();
+            self.tree_manager.rebuild_from_todos(all_todos);
+        }
     }
 
     pub fn update_search_results(&mut self) -> anyhow::Result<()> {
@@ -450,6 +656,13 @@ impl App {
                 // Tree Search: live highlighting in tree view
                 self.mode = AppMode::TreeSearch;
                 self.search_query.clear();
+                self.search_matches.clear();
+                self.current_match_index = None;
+                
+                // Capture current expansion state before starting search
+                self.pre_search_expansion_state = self.tree_manager.expansion_states.clone();
+                self.search_opened_nodes.clear();
+                
                 self.search_input_mode = true;
             }
             KeyCode::Char('n') => {
@@ -934,7 +1147,11 @@ impl App {
                 self.mode = AppMode::List;
                 self.search_query.clear();
                 self.search_matches.clear();
+                self.current_match_index = None;
                 self.search_input_mode = false;
+                
+                // Restore original expansion state for nodes we opened during search
+                self.restore_pre_search_expansion_state();
             }
             KeyCode::Enter => {
                 if self.search_input_mode {
@@ -1014,6 +1231,14 @@ impl App {
                                     }
                                 }
                             }
+                        }
+                        'n' => {
+                            // Navigate to next search match (vim-like behavior)
+                            self.navigate_to_next_match();
+                        }
+                        'N' => {
+                            // Navigate to previous search match (vim-like behavior)
+                            self.navigate_to_previous_match();
                         }
                         ' ' => {
                             // Allow toggling completion during search
@@ -1563,10 +1788,18 @@ impl App {
                     
                     // Check if this todo matches the search
                     let is_match = self.search_matches.contains(&line.todo_id);
+                    let is_current_match = self.current_match_index
+                        .and_then(|idx| self.search_matches.get(idx))
+                        .map(|&match_id| match_id == line.todo_id)
+                        .unwrap_or(false);
                     
                     let (display_style, prefix_style) = if todo.is_completed() {
                         (
-                            if is_match {
+                            if is_current_match {
+                                // Current match - bright and underlined
+                                Style::default().fg(CatppuccinFrappe::RED).add_modifier(Modifier::CROSSED_OUT).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED)
+                            } else if is_match {
+                                // Other matches - highlighted but less prominent
                                 Style::default().fg(CatppuccinFrappe::PEACH).add_modifier(Modifier::CROSSED_OUT).add_modifier(Modifier::BOLD)
                             } else {
                                 Style::default().fg(CatppuccinFrappe::COMPLETED).add_modifier(Modifier::CROSSED_OUT)
@@ -1575,7 +1808,11 @@ impl App {
                         )
                     } else {
                         (
-                            if is_match {
+                            if is_current_match {
+                                // Current match - bright green and underlined
+                                Style::default().fg(CatppuccinFrappe::GREEN).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED)
+                            } else if is_match {
+                                // Other matches - yellow and bold
                                 Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::BOLD)
                             } else {
                                 Style::default().fg(CatppuccinFrappe::INCOMPLETE)
@@ -1602,7 +1839,15 @@ impl App {
         let title = if self.search_query.is_empty() {
             "Todo Tree View".to_string()
         } else {
-            format!("Tree Search - {} matches", self.search_matches.len())
+            match self.current_match_index {
+                Some(current_idx) if !self.search_matches.is_empty() => {
+                    format!("Tree Search - Match {}/{} (n: next, N: prev)", 
+                        current_idx + 1, self.search_matches.len())
+                }
+                _ => {
+                    format!("Tree Search - {} matches (n: next, N: prev)", self.search_matches.len())
+                }
+            }
         };
         
         let list = List::new(items)
@@ -1986,7 +2231,7 @@ impl App {
                 if self.search_input_mode {
                     "Type to search | Enter: Finish input & navigate | Esc: Cancel"
                 } else {
-                    "hjkl/arrows: Navigate | t: Expand/Collapse | Space: Toggle | Enter: View/Edit | Esc: Back"
+                    "hjkl/arrows: Navigate | n/N: Next/Prev Match | t: Expand/Collapse | Space: Toggle | Enter: View/Edit | Esc: Back"
                 }
             }
             AppMode::CompletedView => "Enter: View/Edit | Space: Uncomplete | j/k: Navigate | c: Back to List | q/Esc: Back",

@@ -270,4 +270,43 @@ impl TodoTreeManager {
         // Check if this todo has any children in the database
         self.todos.values().any(|todo| todo.parent_id == Some(target_id))
     }
+    
+    pub fn expand_path_to_todo(&mut self, todo_id: i64) -> Vec<i64> {
+        let mut opened_nodes = Vec::new();
+        
+        // Find the todo and expand all its ancestors
+        if let Some(todo) = self.todos.get(&todo_id) {
+            let mut current_parent_id = todo.parent_id;
+            
+            // Walk up the parent chain and expand each parent
+            while let Some(parent_id) = current_parent_id {
+                // Only expand if it wasn't already expanded
+                let was_expanded = self.expansion_states.get(&parent_id).copied().unwrap_or(false);
+                if !was_expanded {
+                    self.expansion_states.insert(parent_id, true);
+                    opened_nodes.push(parent_id);
+                }
+                
+                // Find the next parent in the chain
+                if let Some(parent_todo) = self.todos.get(&parent_id) {
+                    current_parent_id = parent_todo.parent_id;
+                } else {
+                    break;
+                }
+            }
+            
+            if !opened_nodes.is_empty() {
+                // Rebuild the tree with new expansion states
+                self.tree = self.build_tree();
+                self.rendered_lines = self.render_tree();
+                self.id_to_line = self.rendered_lines
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, line)| (line.todo_id, idx))
+                    .collect();
+            }
+        }
+        
+        opened_nodes
+    }
 }
