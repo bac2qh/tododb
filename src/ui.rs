@@ -17,8 +17,6 @@ use ratatui::{
 pub enum AppMode {
     List,
     CompletedView,
-    View,
-    Edit,
     Create,
     ConfirmDelete,
     ListFind,
@@ -27,11 +25,6 @@ pub enum AppMode {
     Move,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ListViewType {
-    Normal,
-    Tree,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateFieldFocus {
@@ -49,10 +42,8 @@ pub struct App {
     pub tree_list_state: ListState,
     pub completed_list_state: ListState,
     pub mode: AppMode,
-    pub input: String,
     pub input_title: String,
     pub input_description: String,
-    pub editing_id: Option<i64>,
     pub current_parent: Option<i64>,
     pub should_quit: bool,
     pub error_message: Option<String>,
@@ -244,10 +235,8 @@ impl App {
             tree_list_state: ListState::default(),
             completed_list_state: ListState::default(),
             mode: AppMode::List,
-            input: String::new(),
             input_title: String::new(),
             input_description: String::new(),
-            editing_id: None,
             current_parent: None,
             should_quit: false,
             error_message: None,
@@ -478,15 +467,6 @@ impl App {
         }
     }
     
-    fn navigate_to_current_match(&mut self) {
-        if let Some(match_index) = self.current_match_index {
-            if let Some(&match_todo_id) = self.search_matches.get(match_index) {
-                if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
-                    self.tree_list_state.select(Some(line_index));
-                }
-            }
-        }
-    }
     
     fn expand_path_to_todo(&mut self, todo_id: i64) -> Vec<i64> {
         self.tree_manager.expand_path_to_todo(todo_id)
@@ -599,8 +579,6 @@ impl App {
         match self.mode {
             AppMode::List => self.handle_list_key(key)?,
             AppMode::CompletedView => self.handle_completed_view_key(key)?,
-            AppMode::View => self.handle_view_key(key)?,
-            AppMode::Edit => self.handle_edit_key(key)?,
             AppMode::Create => self.handle_create_key(key)?,
             AppMode::ConfirmDelete => self.handle_delete_key(key)?,
             AppMode::ListFind => self.handle_list_find_key(key)?,
@@ -835,58 +813,7 @@ impl App {
         }
     }
 
-    fn handle_view_key(&mut self, key: KeyCode) -> anyhow::Result<()> {
-        match key {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                // Return to the previous mode (either List or CompletedView)
-                if self.get_selected_todo().map(|t| t.is_completed()).unwrap_or(false) {
-                    self.mode = AppMode::CompletedView;
-                } else {
-                    self.mode = AppMode::List;
-                }
-            }
-            KeyCode::Char('e') => {
-                if let Some(todo) = self.get_selected_todo() {
-                    let todo_id = todo.id;
-                    let todo_title = todo.title.clone();
-                    let todo_description = todo.description.clone();
-                    self.mode = AppMode::Edit;
-                    self.editing_id = Some(todo_id);
-                    self.input_title = todo_title;
-                    self.input_description = todo_description;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
 
-    fn handle_edit_key(&mut self, key: KeyCode) -> anyhow::Result<()> {
-        match key {
-            KeyCode::Esc => self.mode = AppMode::List,
-            KeyCode::Enter => {
-                if let Some(id) = self.editing_id {
-                    if !self.input_title.trim().is_empty() {
-                        self.database.update_todo(id, self.input_title.clone(), self.input_description.clone())?;
-                        self.refresh_todos()?;
-                        self.mode = AppMode::List;
-                    } else {
-                        self.error_message = Some("Title cannot be empty".to_string());
-                    }
-                }
-            }
-            KeyCode::Char(c) => {
-                self.input_title.push(c);
-            }
-            KeyCode::Backspace => {
-                self.input_title.pop();
-            }
-            KeyCode::Tab => {
-            }
-            _ => {}
-        }
-        Ok(())
-    }
 
     fn handle_create_key(&mut self, key: KeyCode) -> anyhow::Result<()> {
         match key {
@@ -1571,24 +1498,6 @@ impl App {
         false
     }
 
-    fn get_todo_depth(&self, todo_id: i64) -> usize {
-        let mut depth = 0;
-        for todo in &self.incomplete_todos {
-            if todo.id == todo_id {
-                let mut current_parent = todo.parent_id;
-                while let Some(parent_id) = current_parent {
-                    depth += 1;
-                    if let Some(parent_todo) = self.incomplete_todos.iter().find(|t| t.id == parent_id) {
-                        current_parent = parent_todo.parent_id;
-                    } else {
-                        break;
-                    }
-                }
-                break;
-            }
-        }
-        depth
-    }
 
     pub fn draw(&mut self, f: &mut Frame) {
         let chunks = Layout::default()
@@ -1612,8 +1521,6 @@ impl App {
                 }
             }
             AppMode::CompletedView => self.draw_completed_view(f, chunks[0]),
-            AppMode::View => self.draw_todo_view(f, chunks[0]),
-            AppMode::Edit => self.draw_edit_mode(f, chunks[0]),
             AppMode::Create => self.draw_create_mode(f, chunks[0]),
             AppMode::ConfirmDelete => self.draw_confirm_delete(f, chunks[0]),
             AppMode::ListFind => self.draw_list_find_mode(f, chunks[0]),
@@ -1910,140 +1817,7 @@ impl App {
         f.render_stateful_widget(list, area, &mut self.completed_list_state);
     }
 
-    fn draw_todo_view(&self, f: &mut Frame, area: Rect) {
-        if let Some(todo) = self.get_selected_todo() {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3), // Header info
-                    Constraint::Length(3), // Title
-                    Constraint::Length(5), // Metadata 
-                    Constraint::Min(0),    // Description
-                ])
-                .split(area);
 
-            // Header: ID, Status, and basic info
-            let status_text = if todo.is_completed() {
-                "✓ COMPLETED"
-            } else {
-                "○ INCOMPLETE"
-            };
-            
-            let header_text = format!("Todo #{} | Status: {}", todo.id, status_text);
-            let header_style = if todo.is_completed() {
-                Style::default().fg(CatppuccinFrappe::COMPLETED)
-            } else {
-                Style::default().fg(CatppuccinFrappe::INCOMPLETE)
-            };
-
-            let header_block = Paragraph::new(header_text)
-                .block(Block::default()
-                    .borders(Borders::ALL)
-                    .title("Todo Information")
-                    .border_style(Style::default().fg(CatppuccinFrappe::BORDER)))
-                .style(header_style)
-                .wrap(Wrap { trim: true });
-            f.render_widget(header_block, chunks[0]);
-
-            // Title section
-            let title_block = Paragraph::new(todo.title.clone())
-                .block(Block::default()
-                    .borders(Borders::ALL)
-                    .title("Title")
-                    .border_style(Style::default().fg(CatppuccinFrappe::BORDER)))
-                .style(Style::default().fg(CatppuccinFrappe::TEXT))
-                .wrap(Wrap { trim: true });
-            f.render_widget(title_block, chunks[1]);
-
-            // Metadata section: Dates and relationships
-            let created_time = todo.created_at.with_timezone(&Local).format("%A, %B %d, %Y at %I:%M %p").to_string();
-            
-            let completion_text = if let Some(completed_at) = todo.completed_at {
-                let completed_time = completed_at.with_timezone(&Local).format("%A, %B %d, %Y at %I:%M %p").to_string();
-                let duration = completed_at.signed_duration_since(todo.created_at);
-                let duration_text = if duration.num_days() > 0 {
-                    format!("{} days", duration.num_days())
-                } else if duration.num_hours() > 0 {
-                    format!("{} hours", duration.num_hours())
-                } else {
-                    format!("{} minutes", duration.num_minutes())
-                };
-                format!("Completed: {}\nDuration: {}", completed_time, duration_text)
-            } else {
-                let duration = chrono::Utc::now().signed_duration_since(todo.created_at);
-                let age_text = if duration.num_days() > 0 {
-                    format!("{} days ago", duration.num_days())
-                } else if duration.num_hours() > 0 {
-                    format!("{} hours ago", duration.num_hours())
-                } else {
-                    format!("{} minutes ago", duration.num_minutes())
-                };
-                format!("Still pending (created {})", age_text)
-            };
-
-            let parent_text = if let Some(parent_id) = todo.parent_id {
-                match self.database.get_parent_title(Some(parent_id)) {
-                    Ok(Some(parent_title)) => format!("Parent: #{} - {}", parent_id, parent_title),
-                    _ => format!("Parent: #{} (title not found)", parent_id),
-                }
-            } else {
-                "Parent: None (root todo)".to_string()
-            };
-
-            let metadata_text = format!(
-                "Created: {}\n{}\n{}",
-                created_time, completion_text, parent_text
-            );
-
-            let metadata_block = Paragraph::new(metadata_text)
-                .block(Block::default()
-                    .borders(Borders::ALL)
-                    .title("Metadata")
-                    .border_style(Style::default().fg(CatppuccinFrappe::BORDER)))
-                .style(Style::default().fg(CatppuccinFrappe::SUBTEXT1))
-                .wrap(Wrap { trim: true });
-            f.render_widget(metadata_block, chunks[2]);
-
-            // Description section
-            let description_text = if todo.description.trim().is_empty() {
-                "(No description provided)".to_string()
-            } else {
-                todo.description.clone()
-            };
-
-            let description_block = Paragraph::new(description_text)
-                .block(Block::default()
-                    .borders(Borders::ALL)
-                    .title("Description")
-                    .border_style(Style::default().fg(CatppuccinFrappe::BORDER)))
-                .style(Style::default().fg(CatppuccinFrappe::TEXT))
-                .wrap(Wrap { trim: true });
-            f.render_widget(description_block, chunks[3]);
-        }
-    }
-
-    fn draw_edit_mode(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(0)])
-            .split(area);
-
-        let title_input = Paragraph::new(self.input_title.as_str())
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title("Edit Title")
-                .border_style(Style::default().fg(CatppuccinFrappe::YELLOW)))
-            .style(Style::default().fg(CatppuccinFrappe::TEXT));
-        f.render_widget(title_input, chunks[0]);
-
-        let description_input = Paragraph::new(self.input_description.as_str())
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title("Description")
-                .border_style(Style::default().fg(CatppuccinFrappe::YELLOW)))
-            .style(Style::default().fg(CatppuccinFrappe::TEXT));
-        f.render_widget(description_input, chunks[1]);
-    }
 
     fn draw_create_mode(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
@@ -2235,8 +2009,6 @@ impl App {
                 }
             }
             AppMode::CompletedView => "Enter: View/Edit | Space: Uncomplete | j/k: Navigate | c: Back to List | q/Esc: Back",
-            AppMode::View => "e: Edit | q/Esc: Back",
-            AppMode::Edit => "Enter: Save | Esc: Cancel",
             AppMode::Create => "Tab: Next Field | r: Clear Parent | Enter: Save | Esc: Cancel",
             AppMode::ConfirmDelete => "y: Yes | n/Esc: No",
             AppMode::ListFind => {

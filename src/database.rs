@@ -115,41 +115,6 @@ impl Database {
         Ok(todos)
     }
 
-    pub fn get_root_todos(&self) -> anyhow::Result<Vec<Todo>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, created_at, completed_at, parent_id 
-             FROM todos 
-             WHERE parent_id IS NULL
-             ORDER BY created_at DESC"
-        )?;
-        
-        let todo_iter = stmt.query_map([], |row| Todo::from_row(row))?;
-        
-        let mut todos = Vec::new();
-        for todo in todo_iter {
-            todos.push(todo?);
-        }
-        
-        Ok(todos)
-    }
-
-    pub fn get_children_todos(&self, parent_id: i64) -> anyhow::Result<Vec<Todo>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, created_at, completed_at, parent_id 
-             FROM todos 
-             WHERE parent_id = ?1
-             ORDER BY created_at DESC"
-        )?;
-        
-        let todo_iter = stmt.query_map([parent_id], |row| Todo::from_row(row))?;
-        
-        let mut todos = Vec::new();
-        for todo in todo_iter {
-            todos.push(todo?);
-        }
-        
-        Ok(todos)
-    }
 
     pub fn get_todo_by_id(&self, id: i64) -> anyhow::Result<Option<Todo>> {
         let mut stmt = self.conn.prepare(

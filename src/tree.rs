@@ -13,7 +13,6 @@ pub struct RenderedLine {
     pub todo_id: i64,
     pub prefix: String,
     pub display_text: String,
-    pub depth: usize,
     pub has_children: bool,
 }
 
@@ -160,7 +159,6 @@ impl TodoTreeManager {
                 todo_id: node.id,
                 prefix,
                 display_text,
-                depth,
                 has_children: !node.children.is_empty(),
             });
 
