@@ -23,6 +23,7 @@ pub enum AppMode {
     TreeSearch,
     ParentSearch,
     Move,
+    Help,
 }
 
 
@@ -42,6 +43,7 @@ pub struct App {
     pub tree_list_state: ListState,
     pub completed_list_state: ListState,
     pub mode: AppMode,
+    pub previous_mode: AppMode,
     pub input_title: String,
     pub input_description: String,
     pub current_parent: Option<i64>,
@@ -235,6 +237,7 @@ impl App {
             tree_list_state: ListState::default(),
             completed_list_state: ListState::default(),
             mode: AppMode::List,
+            previous_mode: AppMode::List,
             input_title: String::new(),
             input_description: String::new(),
             current_parent: None,
@@ -576,6 +579,13 @@ impl App {
     pub fn handle_key_event(&mut self, key: KeyCode) -> anyhow::Result<()> {
         self.error_message = None;
 
+        // Global help key - available from any mode except Help itself
+        if key == KeyCode::Char('h') && self.mode != AppMode::Help {
+            self.previous_mode = self.mode.clone();
+            self.mode = AppMode::Help;
+            return Ok(());
+        }
+
         match self.mode {
             AppMode::List => self.handle_list_key(key)?,
             AppMode::CompletedView => self.handle_completed_view_key(key)?,
@@ -585,6 +595,7 @@ impl App {
             AppMode::TreeSearch => self.handle_tree_search_key(key)?,
             AppMode::ParentSearch => self.handle_parent_search_key(key)?,
             AppMode::Move => self.handle_move_key(key)?,
+            AppMode::Help => self.handle_help_key(key)?,
         }
         Ok(())
     }
@@ -1377,6 +1388,16 @@ impl App {
         Ok(())
     }
 
+    fn handle_help_key(&mut self, key: KeyCode) -> anyhow::Result<()> {
+        match key {
+            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Char('q') => {
+                self.mode = self.previous_mode.clone();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn highlight_current_parent_for_move(&mut self) {
         if let Some(move_todo_id) = self.move_todo_id {
             // Find the todo being moved
@@ -1500,6 +1521,12 @@ impl App {
 
 
     pub fn draw(&mut self, f: &mut Frame) {
+        if self.mode == AppMode::Help {
+            // Help mode takes full screen
+            self.draw_help_page(f, f.area());
+            return;
+        }
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(3)])
@@ -1532,6 +1559,10 @@ impl App {
                 } else {
                     self.draw_split_todo_lists(f, chunks[0]);
                 }
+            }
+            AppMode::Help => {
+                // This case is handled above, but needed for exhaustive matching
+                unreachable!();
             }
         }
 
@@ -1991,36 +2022,55 @@ impl App {
         f.render_stateful_widget(list, chunks[1], &mut self.search_list_state);
     }
 
+    fn draw_help_page(&self, f: &mut Frame, area: Rect) {
+        // Create a centered popup
+        let popup_area = centered_rect(80, 70, area);
+        
+        // Clear the background
+        f.render_widget(Clear, popup_area);
+        
+        let help_content = vec![
+            "NAVIGATION".to_string(),
+            "  j/k or ↑/↓      Navigate todos".to_string(),
+            "  h/l or ←/→      Navigate hierarchy levels".to_string(),
+            "  t               Expand/Collapse tree nodes".to_string(),
+            "".to_string(),
+            "ACTIONS".to_string(),
+            "  Space           Toggle completion status".to_string(),
+            "  Enter           View/Edit todo in $EDITOR".to_string(),
+            "  n               Create new todo".to_string(),
+            "  d               Delete selected todo".to_string(),
+            "  m               Move todo (tree view only)".to_string(),
+            "  c               Show/hide completed todos".to_string(),
+            "".to_string(),
+            "SEARCH & MODES".to_string(),
+            "  /               Tree search with live highlighting".to_string(),
+            "  f               List search (flat view)".to_string(),
+            "  n/N             Navigate search matches (in search mode)".to_string(),
+            "".to_string(),
+            "GENERAL".to_string(),
+            "  h               Show/hide this help page".to_string(),
+            "  q               Quit application".to_string(),
+            "  Esc             Cancel current operation".to_string(),
+            "".to_string(),
+            "Press h, Esc, or q to close this help".to_string(),
+        ];
+        
+        let help_text = help_content.join("\n");
+        
+        let help_block = Paragraph::new(help_text)
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .title("TodoDB Help")
+                .border_style(Style::default().fg(CatppuccinFrappe::BLUE)))
+            .style(Style::default().fg(CatppuccinFrappe::TEXT))
+            .wrap(Wrap { trim: true });
+        
+        f.render_widget(help_block, popup_area);
+    }
 
     fn draw_help(&self, f: &mut Frame, area: Rect) {
-        let help_text = match self.mode {
-            AppMode::List => {
-                if self.use_tree_view {
-                    "/: Tree Search | f: List Find | n: New | t: Expand/Collapse | c: Show Completed | m: Move | Enter: View/Edit | d: Delete | Space: Toggle Completion | h/l: Navigate | q: Quit"
-                } else {
-                    "/: Tree Search | f: List Find | n: New | c: Show Completed | m: Move | Enter: View/Edit | d: Delete | Space: Toggle Completion | h/l: Navigate | q: Quit"
-                }
-            }
-            AppMode::TreeSearch => {
-                if self.search_input_mode {
-                    "Type to search | Enter: Finish input & navigate | Esc: Cancel"
-                } else {
-                    "hjkl/arrows: Navigate | n/N: Next/Prev Match | t: Expand/Collapse | Space: Toggle | Enter: View/Edit | Esc: Back"
-                }
-            }
-            AppMode::CompletedView => "Enter: View/Edit | Space: Uncomplete | j/k: Navigate | c: Back to List | q/Esc: Back",
-            AppMode::Create => "Tab: Next Field | r: Clear Parent | Enter: Save | Esc: Cancel",
-            AppMode::ConfirmDelete => "y: Yes | n/Esc: No",
-            AppMode::ListFind => {
-                if self.search_input_mode {
-                    "Type to search | Enter: Finish input & navigate | Esc: Cancel"
-                } else {
-                    "hjkl/arrows: Navigate | Enter: View/Edit | Esc: Back"
-                }
-            }
-            AppMode::ParentSearch => "Type to search | Enter: Select Parent | j/k: Navigate | Esc: Back",
-            AppMode::Move => "j/k: Navigate | Enter: Move to selected parent | Esc: Cancel",
-        };
+        let help_text = "Press h for help | q to quit";
 
         let help = Paragraph::new(help_text)
             .block(Block::default()
