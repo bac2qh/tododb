@@ -579,8 +579,16 @@ impl App {
     pub fn handle_key_event(&mut self, key: KeyCode) -> anyhow::Result<()> {
         self.error_message = None;
 
-        // Global help key - available from any mode except Help itself
-        if key == KeyCode::Char('h') && self.mode != AppMode::Help {
+        // Global help key - available from any mode except Help itself and text input modes
+        let is_in_text_input_mode = match self.mode {
+            AppMode::Create => true,
+            AppMode::ListFind if self.search_input_mode => true,
+            AppMode::TreeSearch if self.search_input_mode => true,
+            AppMode::ParentSearch => true,
+            _ => false,
+        };
+
+        if key == KeyCode::Char('h') && self.mode != AppMode::Help && !is_in_text_input_mode {
             self.previous_mode = self.mode.clone();
             self.mode = AppMode::Help;
             return Ok(());
