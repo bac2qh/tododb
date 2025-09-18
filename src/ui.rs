@@ -564,8 +564,15 @@ impl App {
             _ => {
                 if self.use_tree_view {
                     let selected = self.tree_list_state.selected()?;
+
+                    // In move mode, index 0 is the virtual ROOT entry
+                    if self.mode == AppMode::Move && selected == 0 {
+                        return None; // ROOT is not a real todo
+                    }
+
                     let rendered_lines = self.tree_manager.get_rendered_lines();
-                    let line = rendered_lines.get(selected)?;
+                    let tree_index = if self.mode == AppMode::Move { selected - 1 } else { selected };
+                    let line = rendered_lines.get(tree_index)?;
                     self.tree_manager.get_todo_by_id(line.todo_id)
                 } else {
                     let todos = self.get_current_todos();
@@ -1367,26 +1374,23 @@ impl App {
             }
             KeyCode::Enter => {
                 if let Some(move_todo_id) = self.move_todo_id {
-                    if let Some(highlighted_todo) = self.get_selected_todo() {
-                        let new_parent_id = Some(highlighted_todo.id);
-                        
-                        // Check if highlighting root/no parent position
-                        let new_parent_id = if self.is_highlighting_root_position() {
-                            None
-                        } else {
-                            new_parent_id
-                        };
-                        
-                        match self.database.move_todo(move_todo_id, new_parent_id) {
-                            Ok(()) => {
-                                self.refresh_todos()?;
-                                self.tree_manager.rebuild_from_todos(self.incomplete_todos.clone());
-                                self.mode = AppMode::List;
-                                self.move_todo_id = None;
-                            }
-                            Err(e) => {
-                                self.error_message = Some(format!("Cannot move todo: {}", e));
-                            }
+                    let new_parent_id = if self.is_highlighting_root_position() {
+                        None // Move to root level
+                    } else if let Some(highlighted_todo) = self.get_selected_todo() {
+                        Some(highlighted_todo.id)
+                    } else {
+                        return Ok(()); // No valid selection
+                    };
+
+                    match self.database.move_todo(move_todo_id, new_parent_id) {
+                        Ok(()) => {
+                            self.refresh_todos()?;
+                            self.tree_manager.rebuild_from_todos(self.incomplete_todos.clone());
+                            self.mode = AppMode::List;
+                            self.move_todo_id = None;
+                        }
+                        Err(e) => {
+                            self.error_message = Some(format!("Cannot move todo: {}", e));
                         }
                     }
                 }
@@ -1416,6 +1420,10 @@ impl App {
                         self.tree_list_state.select(Some(parent_index));
                         return;
                     }
+                } else {
+                    // Todo has no parent, so it's at root level - highlight ROOT
+                    self.tree_list_state.select(Some(0));
+                    return;
                 }
             }
             // If no parent or parent not found, highlight the first valid candidate
@@ -1425,34 +1433,38 @@ impl App {
 
     fn move_to_next_valid_parent(&mut self) {
         let rendered_lines = self.tree_manager.get_rendered_lines();
+        let total_items = if self.mode == AppMode::Move { rendered_lines.len() + 1 } else { rendered_lines.len() };
+
         if let Some(current_selection) = self.tree_list_state.selected() {
-            let mut next_index = (current_selection + 1) % rendered_lines.len();
-            
+            let mut next_index = (current_selection + 1) % total_items;
+
             // Find next valid parent candidate
             while !self.is_valid_parent_candidate_at_index(next_index) {
-                next_index = (next_index + 1) % rendered_lines.len();
+                next_index = (next_index + 1) % total_items;
                 if next_index == current_selection {
                     break; // Avoid infinite loop
                 }
             }
-            
+
             self.tree_list_state.select(Some(next_index));
         }
     }
 
     fn move_to_previous_valid_parent(&mut self) {
         let rendered_lines = self.tree_manager.get_rendered_lines();
+        let total_items = if self.mode == AppMode::Move { rendered_lines.len() + 1 } else { rendered_lines.len() };
+
         if let Some(current_selection) = self.tree_list_state.selected() {
             let mut prev_index = if current_selection == 0 {
-                rendered_lines.len() - 1
+                total_items - 1
             } else {
                 current_selection - 1
             };
-            
+
             // Find previous valid parent candidate
             while !self.is_valid_parent_candidate_at_index(prev_index) {
                 prev_index = if prev_index == 0 {
-                    rendered_lines.len() - 1
+                    total_items - 1
                 } else {
                     prev_index - 1
                 };
@@ -1460,14 +1472,16 @@ impl App {
                     break; // Avoid infinite loop
                 }
             }
-            
+
             self.tree_list_state.select(Some(prev_index));
         }
     }
 
     fn move_to_first_valid_parent(&mut self) {
         let rendered_lines = self.tree_manager.get_rendered_lines();
-        for (index, _) in rendered_lines.iter().enumerate() {
+        let total_items = if self.mode == AppMode::Move { rendered_lines.len() + 1 } else { rendered_lines.len() };
+
+        for index in 0..total_items {
             if self.is_valid_parent_candidate_at_index(index) {
                 self.tree_list_state.select(Some(index));
                 return;
@@ -1477,11 +1491,18 @@ impl App {
 
     fn is_valid_parent_candidate_at_index(&self, index: usize) -> bool {
         if let Some(move_todo_id) = self.move_todo_id {
+            // In move mode, index 0 is always the virtual ROOT entry
+            if self.mode == AppMode::Move && index == 0 {
+                return true; // ROOT is always a valid parent
+            }
+
             let rendered_lines = self.tree_manager.get_rendered_lines();
-            if index < rendered_lines.len() {
-                let line = &rendered_lines[index];
+            let tree_index = if self.mode == AppMode::Move { index - 1 } else { index };
+
+            if tree_index < rendered_lines.len() {
+                let line = &rendered_lines[tree_index];
                 let todo_id = line.todo_id;
-                
+
                 // Cannot move to itself or its descendants
                 return todo_id != move_todo_id && !self.is_descendant_of(todo_id, move_todo_id);
             }
@@ -1490,15 +1511,20 @@ impl App {
     }
 
     fn is_highlighting_root_position(&self) -> bool {
-        // For simplicity, we'll handle root moves differently
-        // This could be enhanced to have a special root indicator
+        if self.mode == AppMode::Move {
+            if let Some(selected) = self.tree_list_state.selected() {
+                return selected == 0; // First item is the virtual ROOT
+            }
+        }
         false
     }
 
     fn find_todo_index_in_tree(&self, todo_id: i64) -> Option<usize> {
         let rendered_lines = self.tree_manager.get_rendered_lines();
-        for (index, line) in rendered_lines.iter().enumerate() {
+        for (tree_index, line) in rendered_lines.iter().enumerate() {
             if line.todo_id == todo_id {
+                // In move mode, add 1 to account for the virtual ROOT entry at index 0
+                let index = if self.mode == AppMode::Move { tree_index + 1 } else { tree_index };
                 return Some(index);
             }
         }
@@ -1629,11 +1655,24 @@ impl App {
 
     fn draw_tree_view(&mut self, f: &mut Frame, area: Rect) {
         let rendered_lines = self.tree_manager.get_rendered_lines();
-        
-        let items: Vec<ListItem> = rendered_lines
+
+        let mut items: Vec<ListItem> = Vec::new();
+
+        // Add virtual ROOT entry at the top in move mode
+        if self.mode == AppMode::Move {
+            let root_style = Style::default().fg(CatppuccinFrappe::GREEN).add_modifier(Modifier::BOLD);
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled("ROOT", root_style),
+                Span::styled(" (Move here to make top-level)", Style::default().fg(CatppuccinFrappe::SUBTEXT1)),
+            ])));
+        }
+
+        // Add the regular tree items, adjusting index for move mode
+        let tree_items: Vec<ListItem> = rendered_lines
             .iter()
             .enumerate()
-            .map(|(index, line)| {
+            .map(|(tree_index, line)| {
+                let index = if self.mode == AppMode::Move { tree_index + 1 } else { tree_index };
                 if let Some(todo) = self.tree_manager.get_todo_by_id(line.todo_id) {
                     let created_time = todo.created_at.with_timezone(&Local).format("%m/%d %H:%M").to_string();
                     
@@ -1676,6 +1715,9 @@ impl App {
                 }
             })
             .collect();
+
+        // Append tree items to the main items list
+        items.extend(tree_items);
 
         let title = if self.mode == AppMode::Move {
             if let Some(move_todo_id) = self.move_todo_id {
