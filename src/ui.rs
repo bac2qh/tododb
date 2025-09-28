@@ -8,7 +8,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
     },
     Frame,
 };
@@ -68,6 +68,9 @@ pub struct App {
     pub goto_query: String,
     pub goto_matches: Vec<i64>,
     pub goto_current_match_index: Option<usize>,
+    pub list_scrollbar_state: ScrollbarState,
+    pub tree_scrollbar_state: ScrollbarState,
+    pub completed_scrollbar_state: ScrollbarState,
 }
 
 impl App {
@@ -266,6 +269,9 @@ impl App {
             goto_query: String::new(),
             goto_matches: Vec::new(),
             goto_current_match_index: None,
+            list_scrollbar_state: ScrollbarState::default(),
+            tree_scrollbar_state: ScrollbarState::default(),
+            completed_scrollbar_state: ScrollbarState::default(),
         };
         app.refresh_todos()?;
         if !app.incomplete_todos.is_empty() {
@@ -289,6 +295,26 @@ impl App {
         }
         
         Ok(())
+    }
+
+    pub fn update_scrollbar_states(&mut self) {
+        // Update list scrollbar
+        let list_len = self.incomplete_todos.len();
+        self.list_scrollbar_state = self.list_scrollbar_state
+            .content_length(list_len)
+            .position(self.list_state.selected().unwrap_or(0));
+
+        // Update tree scrollbar
+        let tree_len = self.tree_manager.get_rendered_lines().len();
+        self.tree_scrollbar_state = self.tree_scrollbar_state
+            .content_length(tree_len)
+            .position(self.tree_list_state.selected().unwrap_or(0));
+
+        // Update completed scrollbar
+        let completed_len = self.completed_todos.len();
+        self.completed_scrollbar_state = self.completed_scrollbar_state
+            .content_length(completed_len)
+            .position(self.completed_list_state.selected().unwrap_or(0));
     }
 
     fn get_all_completed_todos(&self) -> anyhow::Result<Vec<Todo>> {
@@ -1840,6 +1866,9 @@ impl App {
 
 
     pub fn draw(&mut self, f: &mut Frame) {
+        // Update scrollbar states before drawing
+        self.update_scrollbar_states();
+
         if self.mode == AppMode::Help {
             // Help mode takes full screen
             self.draw_help_page(f, f.area());
@@ -1941,7 +1970,23 @@ impl App {
             .highlight_style(highlight_style)
             .highlight_symbol("▶ ");
 
-        f.render_stateful_widget(list, area, &mut self.list_state);
+        // Split area to make room for scrollbar
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(area);
+
+        f.render_stateful_widget(list, chunks[0], &mut self.list_state);
+
+        // Draw scrollbar
+        let scrollbar = Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓"))
+            .style(Style::default().fg(CatppuccinFrappe::SURFACE2))
+            .thumb_style(Style::default().fg(CatppuccinFrappe::SUBTEXT1));
+
+        f.render_stateful_widget(scrollbar, chunks[1], &mut self.list_scrollbar_state);
     }
 
 
@@ -2051,7 +2096,23 @@ impl App {
                 .fg(CatppuccinFrappe::SELECTED))
             .highlight_symbol("▶ ");
 
-        f.render_stateful_widget(list, area, &mut self.tree_list_state);
+        // Split area to make room for scrollbar
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(area);
+
+        f.render_stateful_widget(list, chunks[0], &mut self.tree_list_state);
+
+        // Draw scrollbar
+        let scrollbar = Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓"))
+            .style(Style::default().fg(CatppuccinFrappe::SURFACE2))
+            .thumb_style(Style::default().fg(CatppuccinFrappe::SUBTEXT1));
+
+        f.render_stateful_widget(scrollbar, chunks[1], &mut self.tree_scrollbar_state);
     }
 
     fn draw_idmod_goto_view(&mut self, f: &mut Frame, area: Rect) {
@@ -2171,7 +2232,23 @@ impl App {
                 .fg(CatppuccinFrappe::SELECTED))
             .highlight_symbol("▶ ");
 
-        f.render_stateful_widget(list, area, &mut self.tree_list_state);
+        // Split area to make room for scrollbar
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(area);
+
+        f.render_stateful_widget(list, chunks[0], &mut self.tree_list_state);
+
+        // Draw scrollbar
+        let scrollbar = Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓"))
+            .style(Style::default().fg(CatppuccinFrappe::SURFACE2))
+            .thumb_style(Style::default().fg(CatppuccinFrappe::SUBTEXT1));
+
+        f.render_stateful_widget(scrollbar, chunks[1], &mut self.tree_scrollbar_state);
     }
 
     fn draw_tree_search_view(&mut self, f: &mut Frame, area: Rect) {
@@ -2277,7 +2354,23 @@ impl App {
                 .fg(CatppuccinFrappe::SELECTED))
             .highlight_symbol("▶ ");
 
-        f.render_stateful_widget(list, area, &mut self.tree_list_state);
+        // Split area to make room for scrollbar
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(area);
+
+        f.render_stateful_widget(list, chunks[0], &mut self.tree_list_state);
+
+        // Draw scrollbar
+        let scrollbar = Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓"))
+            .style(Style::default().fg(CatppuccinFrappe::SURFACE2))
+            .thumb_style(Style::default().fg(CatppuccinFrappe::SUBTEXT1));
+
+        f.render_stateful_widget(scrollbar, chunks[1], &mut self.tree_scrollbar_state);
     }
 
     fn draw_completed_view(&mut self, f: &mut Frame, area: Rect) {
@@ -2324,7 +2417,23 @@ impl App {
             .highlight_style(highlight_style)
             .highlight_symbol("▶ ");
 
-        f.render_stateful_widget(list, area, &mut self.completed_list_state);
+        // Split area to make room for scrollbar
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(area);
+
+        f.render_stateful_widget(list, chunks[0], &mut self.completed_list_state);
+
+        // Draw scrollbar
+        let scrollbar = Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓"))
+            .style(Style::default().fg(CatppuccinFrappe::SURFACE2))
+            .thumb_style(Style::default().fg(CatppuccinFrappe::SUBTEXT1));
+
+        f.render_stateful_widget(scrollbar, chunks[1], &mut self.completed_scrollbar_state);
     }
 
 
