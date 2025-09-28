@@ -11,6 +11,7 @@ pub struct Todo {
     pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
     pub parent_id: Option<i64>,
+    pub hidden: bool,
 }
 
 impl Todo {
@@ -22,6 +23,7 @@ impl Todo {
             created_at: row.get(3)?,
             completed_at: row.get(4)?,
             parent_id: row.get(5)?,
+            hidden: row.get(6).unwrap_or(false),
         })
     }
 
@@ -77,22 +79,31 @@ impl Database {
                 created_at TEXT NOT NULL,
                 completed_at TEXT,
                 parent_id INTEGER,
+                hidden INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (parent_id) REFERENCES todos (id)
             )",
             [],
         )?;
+
+        // Add hidden column to existing tables (migration)
+        let _ = self.conn.execute(
+            "ALTER TABLE todos ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+
         Ok(())
     }
 
     pub fn create_todo(&self, new_todo: NewTodo) -> anyhow::Result<i64> {
         let now = Utc::now();
         let _id = self.conn.execute(
-            "INSERT INTO todos (title, description, created_at, parent_id) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO todos (title, description, created_at, parent_id, hidden) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 new_todo.title,
                 new_todo.description,
                 now,
-                new_todo.parent_id
+                new_todo.parent_id,
+                false
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -100,8 +111,8 @@ impl Database {
 
     pub fn get_all_todos(&self) -> anyhow::Result<Vec<Todo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, created_at, completed_at, parent_id 
-             FROM todos 
+            "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+             FROM todos
              ORDER BY created_at DESC"
         )?;
         
@@ -118,8 +129,8 @@ impl Database {
 
     pub fn get_todo_by_id(&self, id: i64) -> anyhow::Result<Option<Todo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, created_at, completed_at, parent_id 
-             FROM todos 
+            "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+             FROM todos
              WHERE id = ?1"
         )?;
         
@@ -151,6 +162,14 @@ impl Database {
     pub fn uncomplete_todo(&self, id: i64) -> anyhow::Result<()> {
         self.conn.execute(
             "UPDATE todos SET completed_at = NULL WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn toggle_todo_hidden(&self, id: i64) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE todos SET hidden = NOT hidden WHERE id = ?1",
             params![id],
         )?;
         Ok(())
@@ -204,8 +223,8 @@ impl Database {
         match parent_id {
             Some(pid) => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT id, title, description, created_at, completed_at, parent_id 
-                     FROM todos 
+                    "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+                     FROM todos
                      WHERE parent_id = ?1 AND completed_at IS NULL
                      ORDER BY created_at DESC"
                 )?;
@@ -216,8 +235,8 @@ impl Database {
             },
             None => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT id, title, description, created_at, completed_at, parent_id 
-                     FROM todos 
+                    "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+                     FROM todos
                      WHERE completed_at IS NULL
                      ORDER BY created_at DESC"
                 )?;
@@ -237,8 +256,8 @@ impl Database {
         match parent_id {
             Some(pid) => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT id, title, description, created_at, completed_at, parent_id 
-                     FROM todos 
+                    "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+                     FROM todos
                      WHERE parent_id = ?1 AND completed_at IS NOT NULL
                      ORDER BY completed_at DESC
                      LIMIT ?2"
@@ -250,8 +269,8 @@ impl Database {
             },
             None => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT id, title, description, created_at, completed_at, parent_id 
-                     FROM todos 
+                    "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+                     FROM todos
                      WHERE completed_at IS NOT NULL
                      ORDER BY completed_at DESC
                      LIMIT ?1"
@@ -328,8 +347,8 @@ impl Database {
 
         // Get all todos from database
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, created_at, completed_at, parent_id 
-             FROM todos 
+            "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+             FROM todos
              ORDER BY created_at DESC"
         )?;
         

@@ -18,11 +18,20 @@ cargo install --path .         # Install locally
 ### Testing and Development
 ```bash
 cargo run -- --test           # Run functionality tests
-cargo run -- --tree-test      # Run tree functionality tests  
+cargo run -- --tree-test      # Run tree functionality tests
 cargo run -- --demo           # Run with demo data (uses demo_todos.db)
 cargo check                    # Quick compile check
 cargo clippy                   # Lint with Clippy
 ```
+
+### Dependencies
+Core dependencies in use:
+- **ratatui** (0.29): Terminal UI framework
+- **crossterm** (0.28): Cross-platform terminal manipulation
+- **rusqlite** (0.32): SQLite database interface with chrono support
+- **chrono** (0.4): Date/time handling
+- **anyhow** (1.0): Error handling
+- **regex** (1.0): Pattern matching for search functionality
 
 ### Running with Custom Database
 ```bash
@@ -86,6 +95,29 @@ The `TodoTreeManager` handles:
 - Event-driven architecture with keyboard input handling
 - Multiple list states for different views (normal, tree, completed)
 
+## Key Bindings
+
+Understanding the UI interactions for testing and development:
+
+### Navigation & Selection
+- **j/k** or **↑/↓**: Navigate todos
+- **h/l** or **←/→**: Navigate hierarchy levels
+- **Enter**: View/edit todo in $EDITOR
+
+### Todo Management
+- **n**: Create new todo
+- **m**: Move todo (tree view only)
+- **Space**: Toggle completion status
+- **d**: Delete selected todo
+- **c**: Show/hide completed todos
+
+### Modes & Search
+- **t**: Expand/collapse tree nodes
+- **f**: Search all todos (flat view)
+- **/**: Search in tree view (live highlighting)
+- **q**: Quit application
+- **Esc**: Cancel current operation
+
 ## Development Notes
 
 - Database path: Default `~/.local/share/tododb/todos.db`
@@ -94,6 +126,7 @@ The `TodoTreeManager` handles:
 - Markdown rendering supports tables, strikethrough, task lists, footnotes
 - Tree search supports live highlighting with vim-like n/N navigation
 - Color scheme: Catppuccin Frappe throughout
+- Editor preference: Helix recommended (supports `gf` to open URLs from markdown)
 
 ## File Organization
 

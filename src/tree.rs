@@ -36,7 +36,18 @@ impl TodoTreeManager {
     }
 
     pub fn rebuild_from_todos(&mut self, todos: Vec<Todo>) {
-        self.todos = todos.iter().map(|todo| (todo.id, todo.clone())).collect();
+        self.rebuild_from_todos_with_hidden_filter(todos, false);
+    }
+
+    pub fn rebuild_from_todos_with_hidden_filter(&mut self, todos: Vec<Todo>, show_hidden: bool) {
+        // Filter todos based on hidden status if show_hidden is false
+        let filtered_todos: Vec<Todo> = if show_hidden {
+            todos
+        } else {
+            todos.into_iter().filter(|todo| !todo.hidden).collect()
+        };
+
+        self.todos = filtered_todos.iter().map(|todo| (todo.id, todo.clone())).collect();
         self.tree = self.build_tree();
         self.rendered_lines = self.render_tree();
         self.id_to_line = self.rendered_lines

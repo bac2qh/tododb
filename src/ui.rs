@@ -63,6 +63,7 @@ pub struct App {
     pub search_input_mode: bool,
     pub move_todo_id: Option<i64>,
     pub editor_pending: Option<Todo>,
+    pub show_hidden_items: bool,
 }
 
 impl App {
@@ -257,6 +258,7 @@ impl App {
             search_input_mode: false,
             move_todo_id: None,
             editor_pending: None,
+            show_hidden_items: false,
         };
         app.refresh_todos()?;
         if !app.incomplete_todos.is_empty() {
@@ -272,7 +274,7 @@ impl App {
         
         // Rebuild tree view with all todos
         let all_todos = self.database.get_all_todos()?;
-        self.tree_manager.rebuild_from_todos(all_todos);
+        self.tree_manager.rebuild_from_todos_with_hidden_filter(all_todos, self.show_hidden_items);
         
         // Initialize tree selection if we have items
         if !self.tree_manager.get_rendered_lines().is_empty() && self.tree_list_state.selected().is_none() {
@@ -502,7 +504,7 @@ impl App {
         // Rebuild tree if we made changes
         if needs_rebuild {
             let all_todos = self.tree_manager.todos.values().cloned().collect();
-            self.tree_manager.rebuild_from_todos(all_todos);
+            self.tree_manager.rebuild_from_todos_with_hidden_filter(all_todos, self.show_hidden_items);
         }
     }
 
@@ -598,6 +600,28 @@ impl App {
         if key == KeyCode::Char('h') && self.mode != AppMode::Help && !is_in_text_input_mode {
             self.previous_mode = self.mode.clone();
             self.mode = AppMode::Help;
+            return Ok(());
+        }
+
+        // Handle 'a' key: toggle hidden status of selected todo in tree view
+        if key == KeyCode::Char('a') && self.mode != AppMode::Help && !is_in_text_input_mode && self.use_tree_view {
+            if let Some(todo) = self.get_selected_todo() {
+                let todo_id = todo.id;
+                if let Err(e) = self.database.toggle_todo_hidden(todo_id) {
+                    self.error_message = Some(format!("Failed to toggle hidden status: {}", e));
+                } else {
+                    self.refresh_todos()?;
+                    self.update_selection_after_refresh();
+                }
+            }
+            return Ok(());
+        }
+
+        // Handle 'A' key: toggle showing/hiding hidden items in tree view
+        if key == KeyCode::Char('A') && self.mode != AppMode::Help && !is_in_text_input_mode && self.use_tree_view {
+            self.show_hidden_items = !self.show_hidden_items;
+            self.refresh_todos()?;
+            self.update_selection_after_refresh();
             return Ok(());
         }
 
@@ -1385,7 +1409,6 @@ impl App {
                     match self.database.move_todo(move_todo_id, new_parent_id) {
                         Ok(()) => {
                             self.refresh_todos()?;
-                            self.tree_manager.rebuild_from_todos(self.incomplete_todos.clone());
                             self.mode = AppMode::List;
                             self.move_todo_id = None;
                         }
@@ -1676,7 +1699,20 @@ impl App {
                 if let Some(todo) = self.tree_manager.get_todo_by_id(line.todo_id) {
                     let created_time = todo.created_at.with_timezone(&Local).format("%m/%d %H:%M").to_string();
                     
-                    let (display_style, prefix_style) = if todo.is_completed() {
+                    let (display_style, prefix_style) = if todo.hidden && self.show_hidden_items {
+                        // Hidden items shown with italic styling
+                        if todo.is_completed() {
+                            (
+                                Style::default().fg(CatppuccinFrappe::COMPLETED).add_modifier(Modifier::CROSSED_OUT).add_modifier(Modifier::ITALIC),
+                                Style::default().fg(CatppuccinFrappe::SURFACE2).add_modifier(Modifier::ITALIC)
+                            )
+                        } else {
+                            (
+                                Style::default().fg(CatppuccinFrappe::INCOMPLETE).add_modifier(Modifier::ITALIC),
+                                Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR).add_modifier(Modifier::ITALIC)
+                            )
+                        }
+                    } else if todo.is_completed() {
                         (
                             Style::default().fg(CatppuccinFrappe::COMPLETED).add_modifier(Modifier::CROSSED_OUT),
                             Style::default().fg(CatppuccinFrappe::SURFACE2)
@@ -1730,7 +1766,11 @@ impl App {
                 "Move Mode - Green=Valid Parents, j/k=Navigate, Enter=Confirm".to_string()
             }
         } else {
-            "Todo Tree View (All Items)".to_string()
+            if self.show_hidden_items {
+                "Todo Tree View (All Items + Hidden)".to_string()
+            } else {
+                "Todo Tree View (All Items)".to_string()
+            }
         };
         let list = List::new(items)
             .block(Block::default()
@@ -2092,6 +2132,8 @@ impl App {
             "  d               Delete selected todo".to_string(),
             "  m               Move todo (tree view only)".to_string(),
             "  c               Show/hide completed todos".to_string(),
+            "  a               Toggle hidden status (tree view only)".to_string(),
+            "  A               Toggle showing/hiding hidden todos (tree view only)".to_string(),
             "".to_string(),
             "SEARCH & MODES".to_string(),
             "  /               Tree search with live highlighting".to_string(),
