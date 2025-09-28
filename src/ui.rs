@@ -24,6 +24,7 @@ pub enum AppMode {
     ParentSearch,
     Move,
     Help,
+    IdModGoto,
 }
 
 
@@ -64,6 +65,9 @@ pub struct App {
     pub move_todo_id: Option<i64>,
     pub editor_pending: Option<Todo>,
     pub show_hidden_items: bool,
+    pub goto_query: String,
+    pub goto_matches: Vec<i64>,
+    pub goto_current_match_index: Option<usize>,
 }
 
 impl App {
@@ -259,6 +263,9 @@ impl App {
             move_todo_id: None,
             editor_pending: None,
             show_hidden_items: false,
+            goto_query: String::new(),
+            goto_matches: Vec::new(),
+            goto_current_match_index: None,
         };
         app.refresh_todos()?;
         if !app.incomplete_todos.is_empty() {
@@ -519,6 +526,141 @@ impl App {
         Ok(())
     }
 
+    fn update_goto_matches(&mut self) -> anyhow::Result<()> {
+        if self.goto_query.is_empty() {
+            self.goto_matches.clear();
+            self.goto_current_match_index = None;
+        } else {
+            // Parse the goto query as a number
+            if let Ok(target_id_mod) = self.goto_query.parse::<i64>() {
+                // Only search within currently visible todos in the tree
+                let rendered_lines = self.tree_manager.get_rendered_lines();
+                let new_matches: Vec<i64> = rendered_lines
+                    .iter()
+                    .filter_map(|line| {
+                        self.tree_manager.get_todo_by_id(line.todo_id)
+                            .filter(|todo| todo.id_mod() == target_id_mod)
+                            .map(|_| line.todo_id)
+                    })
+                    .collect();
+
+                // Only re-sort if matches have actually changed
+                if new_matches != self.goto_matches {
+                    self.goto_matches = new_matches;
+                    // Sort matches by their appearance order in the tree
+                    self.sort_goto_matches_by_tree_order();
+
+                    // Find closest match to current selection or start from first match
+                    self.goto_current_match_index = if self.goto_matches.is_empty() {
+                        None
+                    } else {
+                        Some(self.find_closest_goto_match_index())
+                    };
+                }
+            } else {
+                self.goto_matches.clear();
+                self.goto_current_match_index = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn sort_goto_matches_by_tree_order(&mut self) {
+        let rendered_lines = self.tree_manager.get_rendered_lines();
+        let line_order: std::collections::HashMap<i64, usize> = rendered_lines
+            .iter()
+            .enumerate()
+            .map(|(idx, line)| (line.todo_id, idx))
+            .collect();
+
+        self.goto_matches.sort_by_key(|&todo_id| {
+            line_order.get(&todo_id).copied().unwrap_or(usize::MAX)
+        });
+    }
+
+    fn find_closest_goto_match_index(&self) -> usize {
+        if self.goto_matches.is_empty() {
+            return 0;
+        }
+
+        let current_selection = self.tree_list_state.selected().unwrap_or(0);
+        let rendered_lines = self.tree_manager.get_rendered_lines();
+
+        if let Some(current_line) = rendered_lines.get(current_selection) {
+            let current_todo_id = current_line.todo_id;
+
+            // If current selection is a match, use it
+            if let Some(pos) = self.goto_matches.iter().position(|&id| id == current_todo_id) {
+                return pos;
+            }
+        }
+
+        // Otherwise, find the closest match by tree position
+        let line_positions: std::collections::HashMap<i64, usize> = rendered_lines
+            .iter()
+            .enumerate()
+            .map(|(idx, line)| (line.todo_id, idx))
+            .collect();
+
+        let mut best_match = 0;
+        let mut best_distance = usize::MAX;
+
+        for (idx, &match_id) in self.goto_matches.iter().enumerate() {
+            if let Some(&match_pos) = line_positions.get(&match_id) {
+                let distance = if match_pos >= current_selection {
+                    match_pos - current_selection
+                } else {
+                    current_selection - match_pos
+                };
+
+                if distance < best_distance {
+                    best_distance = distance;
+                    best_match = idx;
+                }
+            }
+        }
+
+        best_match
+    }
+
+    fn navigate_to_next_goto_match(&mut self) {
+        if self.goto_matches.is_empty() {
+            return;
+        }
+
+        let start_index = self.goto_current_match_index.unwrap_or(0);
+        let matches_len = self.goto_matches.len();
+        let next_index = (start_index + 1) % matches_len;
+
+        if let Some(&match_todo_id) = self.goto_matches.get(next_index) {
+            if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
+                self.goto_current_match_index = Some(next_index);
+                self.tree_list_state.select(Some(line_index));
+            }
+        }
+    }
+
+    fn navigate_to_previous_goto_match(&mut self) {
+        if self.goto_matches.is_empty() {
+            return;
+        }
+
+        let start_index = self.goto_current_match_index.unwrap_or(0);
+        let matches_len = self.goto_matches.len();
+        let prev_index = if start_index == 0 {
+            matches_len - 1
+        } else {
+            start_index - 1
+        };
+
+        if let Some(&match_todo_id) = self.goto_matches.get(prev_index) {
+            if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
+                self.goto_current_match_index = Some(prev_index);
+                self.tree_list_state.select(Some(line_index));
+            }
+        }
+    }
+
     fn get_current_todos(&self) -> &Vec<Todo> {
         match self.mode {
             AppMode::CompletedView => &self.completed_todos,
@@ -593,6 +735,7 @@ impl App {
             AppMode::Create => true,
             AppMode::ListFind if self.search_input_mode => true,
             AppMode::TreeSearch if self.search_input_mode => true,
+            AppMode::IdModGoto if self.search_input_mode => true,
             AppMode::ParentSearch => true,
             _ => false,
         };
@@ -625,6 +768,16 @@ impl App {
             return Ok(());
         }
 
+        // Handle 'g' key: goto mode for id_mod navigation in tree view
+        if key == KeyCode::Char('g') && self.mode != AppMode::Help && !is_in_text_input_mode && self.use_tree_view {
+            self.mode = AppMode::IdModGoto;
+            self.goto_query.clear();
+            self.goto_matches.clear();
+            self.goto_current_match_index = None;
+            self.search_input_mode = true;
+            return Ok(());
+        }
+
         match self.mode {
             AppMode::List => self.handle_list_key(key)?,
             AppMode::CompletedView => self.handle_completed_view_key(key)?,
@@ -635,6 +788,7 @@ impl App {
             AppMode::ParentSearch => self.handle_parent_search_key(key)?,
             AppMode::Move => self.handle_move_key(key)?,
             AppMode::Help => self.handle_help_key(key)?,
+            AppMode::IdModGoto => self.handle_idmod_goto_key(key)?,
         }
         Ok(())
     }
@@ -1382,6 +1536,114 @@ impl App {
         Ok(())
     }
 
+    fn handle_idmod_goto_key(&mut self, key: KeyCode) -> anyhow::Result<()> {
+        match key {
+            KeyCode::Esc => {
+                self.mode = AppMode::List;
+                self.goto_query.clear();
+                self.goto_matches.clear();
+                self.goto_current_match_index = None;
+                self.search_input_mode = false;
+            }
+            KeyCode::Enter => {
+                if self.search_input_mode {
+                    // Finish input mode, enable navigation
+                    self.search_input_mode = false;
+                    self.update_goto_matches()?;
+                } else {
+                    // If there's a selected todo, view/edit it with editor
+                    if let Some(todo) = self.get_selected_todo() {
+                        self.editor_pending = Some(todo.clone());
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if self.search_input_mode {
+                    self.goto_query.pop();
+                    self.update_goto_matches()?;
+                }
+            }
+            KeyCode::Char(c) => {
+                if self.search_input_mode {
+                    // Only allow digits
+                    if c.is_ascii_digit() {
+                        self.goto_query.push(c);
+                        self.update_goto_matches()?;
+                    }
+                } else {
+                    // In navigation mode, handle navigation keys
+                    match c {
+                        'j' => {
+                            if self.use_tree_view {
+                                self.next_tree_item();
+                            }
+                        }
+                        'k' => {
+                            if self.use_tree_view {
+                                self.previous_tree_item();
+                            }
+                        }
+                        'n' => {
+                            // Navigate to next goto match
+                            self.navigate_to_next_goto_match();
+                        }
+                        'N' => {
+                            // Navigate to previous goto match
+                            self.navigate_to_previous_goto_match();
+                        }
+                        ' ' => {
+                            // Allow toggling completion during goto
+                            if let Some(todo) = self.get_selected_todo() {
+                                let todo_id = todo.id;
+                                let is_currently_completed = todo.is_completed();
+
+                                if is_currently_completed {
+                                    self.database.uncomplete_todo(todo_id)?;
+                                } else {
+                                    self.database.complete_todo(todo_id)?;
+                                }
+
+                                if self.use_tree_view {
+                                    self.tree_manager.update_todo_completion(todo_id, !is_currently_completed);
+                                }
+
+                                self.refresh_todos()?;
+                                self.update_selection_after_refresh();
+                                self.update_goto_matches()?;
+                            }
+                        }
+                        _ => {
+                            // Any other character goes to goto input when not in input mode
+                            // Re-enter input mode
+                            if c.is_ascii_digit() {
+                                self.search_input_mode = true;
+                                self.goto_query.push(c);
+                                self.update_goto_matches()?;
+                            }
+                        }
+                    }
+                }
+            }
+            // Arrow keys always work for navigation regardless of mode
+            KeyCode::Down => {
+                if !self.search_input_mode {
+                    if self.use_tree_view {
+                        self.next_tree_item();
+                    }
+                }
+            }
+            KeyCode::Up => {
+                if !self.search_input_mode {
+                    if self.use_tree_view {
+                        self.previous_tree_item();
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn handle_move_key(&mut self, key: KeyCode) -> anyhow::Result<()> {
         match key {
             KeyCode::Esc | KeyCode::Char('q') => {
@@ -1604,6 +1866,13 @@ impl App {
                     self.draw_split_todo_lists(f, chunks[0]);
                 }
             }
+            AppMode::IdModGoto => {
+                if self.use_tree_view {
+                    self.draw_idmod_goto_view(f, chunks[0]);
+                } else {
+                    self.draw_split_todo_lists(f, chunks[0]);
+                }
+            }
             AppMode::CompletedView => self.draw_completed_view(f, chunks[0]),
             AppMode::Create => self.draw_create_mode(f, chunks[0]),
             AppMode::ConfirmDelete => self.draw_confirm_delete(f, chunks[0]),
@@ -1646,7 +1915,7 @@ impl App {
                     .unwrap_or_else(|| "null".to_string());
                 
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("{} [ ] ", todo.id), Style::default().fg(CatppuccinFrappe::SUBTEXT1)),
+                    Span::styled(format!("{} [ ] ", todo.id_mod()), Style::default().fg(CatppuccinFrappe::SUBTEXT1)),
                     Span::styled(todo.title.clone(), Style::default().fg(CatppuccinFrappe::INCOMPLETE)),
                     Span::styled(format!(" | Created: {} | Parent: {}", created_time, parent_title), 
                                Style::default().fg(CatppuccinFrappe::CREATION_TIME)),
@@ -1785,6 +2054,126 @@ impl App {
         f.render_stateful_widget(list, area, &mut self.tree_list_state);
     }
 
+    fn draw_idmod_goto_view(&mut self, f: &mut Frame, area: Rect) {
+        // Split area to make room for goto input at bottom
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(3)])
+            .split(area);
+
+        // Draw tree view with goto highlighting in the main area
+        self.draw_tree_view_with_goto_highlights(f, chunks[0]);
+
+        // Draw goto input at bottom
+        let goto_input = Paragraph::new(self.goto_query.as_str())
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .title("Goto ID (digits only)")
+                .border_style(Style::default().fg(CatppuccinFrappe::SAPPHIRE)))
+            .style(Style::default().fg(CatppuccinFrappe::TEXT));
+        f.render_widget(goto_input, chunks[1]);
+    }
+
+    fn draw_tree_view_with_goto_highlights(&mut self, f: &mut Frame, area: Rect) {
+        let rendered_lines = self.tree_manager.get_rendered_lines();
+
+        let items: Vec<ListItem> = rendered_lines
+            .iter()
+            .map(|line| {
+                if let Some(todo) = self.tree_manager.get_todo_by_id(line.todo_id) {
+                    let created_time = todo.created_at.with_timezone(&Local).format("%m/%d %H:%M").to_string();
+
+                    // Check if this todo matches the goto query
+                    let is_match = self.goto_matches.contains(&line.todo_id);
+                    let is_current_match = self.goto_current_match_index
+                        .and_then(|idx| self.goto_matches.get(idx))
+                        .map(|&match_id| match_id == line.todo_id)
+                        .unwrap_or(false);
+
+                    let (display_style, prefix_style) = if todo.hidden && self.show_hidden_items {
+                        // Hidden items shown with italic styling
+                        if todo.is_completed() {
+                            (
+                                Style::default().fg(CatppuccinFrappe::COMPLETED).add_modifier(Modifier::CROSSED_OUT).add_modifier(Modifier::ITALIC),
+                                Style::default().fg(CatppuccinFrappe::SURFACE2).add_modifier(Modifier::ITALIC)
+                            )
+                        } else {
+                            (
+                                Style::default().fg(CatppuccinFrappe::INCOMPLETE).add_modifier(Modifier::ITALIC),
+                                Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR).add_modifier(Modifier::ITALIC)
+                            )
+                        }
+                    } else if todo.is_completed() {
+                        (
+                            if is_current_match {
+                                // Current match - bright yellow and underlined
+                                Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::CROSSED_OUT).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED)
+                            } else if is_match {
+                                // Other matches - highlighted but less prominent
+                                Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::CROSSED_OUT).add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().fg(CatppuccinFrappe::COMPLETED).add_modifier(Modifier::CROSSED_OUT)
+                            },
+                            Style::default().fg(CatppuccinFrappe::SURFACE2)
+                        )
+                    } else {
+                        (
+                            if is_current_match {
+                                // Current match - bright yellow and underlined
+                                Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED)
+                            } else if is_match {
+                                // Other matches - yellow and bold
+                                Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().fg(CatppuccinFrappe::INCOMPLETE)
+                            },
+                            Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR)
+                        )
+                    };
+
+                    ListItem::new(Line::from(vec![
+                        Span::styled(&line.prefix, prefix_style),
+                        Span::styled(&line.display_text, display_style),
+                        Span::styled(format!(" | Created: {}", created_time),
+                                   Style::default().fg(CatppuccinFrappe::CREATION_TIME)),
+                    ]))
+                } else {
+                    ListItem::new(Line::from(Span::styled(
+                        format!("{}ERROR: Todo not found", line.prefix),
+                        Style::default().fg(CatppuccinFrappe::ERROR)
+                    )))
+                }
+            })
+            .collect();
+
+        let title = if self.goto_query.is_empty() {
+            "Todo Tree View - Goto Mode".to_string()
+        } else {
+            match self.goto_current_match_index {
+                Some(current_idx) if !self.goto_matches.is_empty() => {
+                    format!("Goto {} - Match {}/{} (n: next, N: prev)",
+                        self.goto_query, current_idx + 1, self.goto_matches.len())
+                }
+                _ => {
+                    format!("Goto {} - {} matches (n: next, N: prev)",
+                        self.goto_query, self.goto_matches.len())
+                }
+            }
+        };
+
+        let list = List::new(items)
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(CatppuccinFrappe::BORDER)))
+            .highlight_style(Style::default()
+                .bg(CatppuccinFrappe::SELECTED_BG)
+                .fg(CatppuccinFrappe::SELECTED))
+            .highlight_symbol("▶ ");
+
+        f.render_stateful_widget(list, area, &mut self.tree_list_state);
+    }
+
     fn draw_tree_search_view(&mut self, f: &mut Frame, area: Rect) {
         // Split area to make room for search input at bottom
         let chunks = Layout::default()
@@ -1824,11 +2213,11 @@ impl App {
                     let (display_style, prefix_style) = if todo.is_completed() {
                         (
                             if is_current_match {
-                                // Current match - bright and underlined
+                                // Current match - bright yellow and underlined
                                 Style::default().fg(CatppuccinFrappe::RED).add_modifier(Modifier::CROSSED_OUT).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED)
                             } else if is_match {
                                 // Other matches - highlighted but less prominent
-                                Style::default().fg(CatppuccinFrappe::PEACH).add_modifier(Modifier::CROSSED_OUT).add_modifier(Modifier::BOLD)
+                                Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::CROSSED_OUT).add_modifier(Modifier::BOLD)
                             } else {
                                 Style::default().fg(CatppuccinFrappe::COMPLETED).add_modifier(Modifier::CROSSED_OUT)
                             },
@@ -1837,8 +2226,8 @@ impl App {
                     } else {
                         (
                             if is_current_match {
-                                // Current match - bright green and underlined
-                                Style::default().fg(CatppuccinFrappe::GREEN).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED)
+                                // Current match - bright yellow and underlined
+                                Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED)
                             } else if is_match {
                                 // Other matches - yellow and bold
                                 Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::BOLD)
@@ -1907,7 +2296,7 @@ impl App {
                     .unwrap_or_else(|| "null".to_string());
                 
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("{} [✓] ", todo.id), 
+                    Span::styled(format!("{} [✓] ", todo.id_mod()),
                                Style::default().fg(CatppuccinFrappe::COMPLETED)),
                     Span::styled(
                         todo.title.clone(), 
@@ -2041,7 +2430,7 @@ impl App {
                 };
                 
                 ListItem::new(Line::from(vec![
-                    Span::raw(format!("{} {} ", todo.id, status_icon)),
+                    Span::raw(format!("{} {} ", todo.id_mod(), status_icon)),
                     Span::styled(todo.title.clone(), title_style),
                     Span::raw(format!(" | Created: {}{} | Parent: {}", created_time, completed_time, parent_title)),
                 ]))
@@ -2096,7 +2485,7 @@ impl App {
                 };
                 
                 ListItem::new(Line::from(vec![
-                    Span::raw(format!("{} {} ", todo.id, status_icon)),
+                    Span::raw(format!("{} {} ", todo.id_mod(), status_icon)),
                     Span::styled(todo.title.clone(), title_style),
                     Span::raw(format!(" | Created: {}{} | Parent: {}", created_time, completed_time, parent_title)),
                 ]))
@@ -2138,7 +2527,8 @@ impl App {
             "SEARCH & MODES".to_string(),
             "  /               Tree search with live highlighting".to_string(),
             "  f               List search (flat view)".to_string(),
-            "  n/N             Navigate search matches (in search mode)".to_string(),
+            "  g               Goto ID mode (tree view only)".to_string(),
+            "  n/N             Navigate search matches (in search/goto mode)".to_string(),
             "".to_string(),
             "GENERAL".to_string(),
             "  h               Show/hide this help page".to_string(),

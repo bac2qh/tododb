@@ -164,7 +164,7 @@ impl TodoTreeManager {
                 if node.is_expanded { "▼ " } else { "▶ " }
             } else { "" };
             
-            let display_text = format!("{} {} {}{}", todo.id, status_icon, expansion_indicator, todo.title);
+            let display_text = format!("{} {} {}{}", todo.id_mod(), status_icon, expansion_indicator, todo.title);
             
             lines.push(RenderedLine {
                 todo_id: node.id,
@@ -237,7 +237,7 @@ impl TodoTreeManager {
             if let Some(line) = self.rendered_lines.get_mut(line_idx) {
                 if let Some(todo) = self.todos.get(&todo_id) {
                     let status_icon = if todo.is_completed() { "[✓]" } else { "[ ]" };
-                    line.display_text = format!("{} {} {}", todo.id, status_icon, todo.title);
+                    line.display_text = format!("{} {} {}", todo.id_mod(), status_icon, todo.title);
                 }
             }
         }

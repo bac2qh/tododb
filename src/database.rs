@@ -30,6 +30,10 @@ impl Todo {
     pub fn is_completed(&self) -> bool {
         self.completed_at.is_some()
     }
+
+    pub fn id_mod(&self) -> i64 {
+        self.id % 100
+    }
 }
 
 #[derive(Debug, Clone)]
