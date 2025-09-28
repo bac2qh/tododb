@@ -2,7 +2,7 @@ use crate::database::{Database, NewTodo, Todo};
 use crate::tree::TodoTreeManager;
 use crate::colors::CatppuccinFrappe;
 use chrono::Local;
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -753,7 +753,7 @@ impl App {
         }
     }
 
-    pub fn handle_key_event(&mut self, key: KeyCode) -> anyhow::Result<()> {
+    pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> anyhow::Result<()> {
         self.error_message = None;
 
         // Global help key - available from any mode except Help itself and text input modes
@@ -769,6 +769,18 @@ impl App {
         if key == KeyCode::Char('a') && self.mode != AppMode::Help && !is_in_text_input_mode {
             self.previous_mode = self.mode.clone();
             self.mode = AppMode::Help;
+            return Ok(());
+        }
+
+        // Handle Ctrl+d: half-page scroll down
+        if key == KeyCode::Char('d') && modifiers.contains(KeyModifiers::CONTROL) && !is_in_text_input_mode {
+            self.half_page_down();
+            return Ok(());
+        }
+
+        // Handle Ctrl+u: half-page scroll up
+        if key == KeyCode::Char('u') && modifiers.contains(KeyModifiers::CONTROL) && !is_in_text_input_mode {
+            self.half_page_up();
             return Ok(());
         }
 
@@ -1217,6 +1229,78 @@ impl App {
             None => 0,
         };
         self.tree_list_state.select(Some(i));
+    }
+
+    fn half_page_down(&mut self) {
+        if self.use_tree_view {
+            self.half_page_down_tree();
+        } else {
+            self.half_page_down_list();
+        }
+    }
+
+    fn half_page_up(&mut self) {
+        if self.use_tree_view {
+            self.half_page_up_tree();
+        } else {
+            self.half_page_up_list();
+        }
+    }
+
+    fn half_page_down_tree(&mut self) {
+        let lines_len = self.tree_manager.get_rendered_lines().len();
+        if lines_len == 0 {
+            return;
+        }
+
+        let current = self.tree_list_state.selected().unwrap_or(0);
+        let jump_size = 10; // Half page size - could be made configurable
+        let new_pos = std::cmp::min(current + jump_size, lines_len.saturating_sub(1));
+        self.tree_list_state.select(Some(new_pos));
+    }
+
+    fn half_page_up_tree(&mut self) {
+        let lines_len = self.tree_manager.get_rendered_lines().len();
+        if lines_len == 0 {
+            return;
+        }
+
+        let current = self.tree_list_state.selected().unwrap_or(0);
+        let jump_size = 10; // Half page size - could be made configurable
+        let new_pos = if current >= jump_size {
+            current - jump_size
+        } else {
+            0
+        };
+        self.tree_list_state.select(Some(new_pos));
+    }
+
+    fn half_page_down_list(&mut self) {
+        let list_len = self.incomplete_todos.len();
+        if list_len == 0 {
+            return;
+        }
+
+        let current = self.list_state.selected().unwrap_or(0);
+        let jump_size = 10; // Half page size - could be made configurable
+        let new_pos = std::cmp::min(current + jump_size, list_len.saturating_sub(1));
+        self.list_state.select(Some(new_pos));
+    }
+
+    fn half_page_up_list(&mut self) {
+        let list_len = self.incomplete_todos.len();
+        if list_len == 0 {
+            return;
+        }
+
+        let current = self.list_state.selected().unwrap_or(0);
+        let jump_size = 10; // Half page size - could be made configurable
+        let new_pos = if current >= jump_size {
+            current - jump_size
+        } else {
+            0
+        };
+        self.list_state.select(Some(new_pos));
     }
 
     fn update_tree_selection_after_toggle(&mut self, previous_selected: usize) {
@@ -2620,6 +2704,7 @@ impl App {
         let help_content = vec![
             "NAVIGATION".to_string(),
             "  j/k or ↑/↓      Navigate todos".to_string(),
+            "  Ctrl+d/Ctrl+u   Half-page scroll down/up".to_string(),
             "  h/l or ←/→      Navigate hierarchy levels".to_string(),
             "  t               Expand/Collapse tree nodes".to_string(),
             "".to_string(),

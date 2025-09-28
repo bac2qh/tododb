@@ -99,7 +99,7 @@ fn run_app<B: ratatui::backend::Backend + std::io::Write>(
 
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
-                app.handle_key_event(key.code)?;
+                app.handle_key_event(key.code, key.modifiers)?;
                 if app.should_quit {
                     break;
                 }
