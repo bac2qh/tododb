@@ -740,14 +740,14 @@ impl App {
             _ => false,
         };
 
-        if key == KeyCode::Char('h') && self.mode != AppMode::Help && !is_in_text_input_mode {
+        if key == KeyCode::Char('a') && self.mode != AppMode::Help && !is_in_text_input_mode {
             self.previous_mode = self.mode.clone();
             self.mode = AppMode::Help;
             return Ok(());
         }
 
-        // Handle 'a' key: toggle hidden status of selected todo in tree view
-        if key == KeyCode::Char('a') && self.mode != AppMode::Help && !is_in_text_input_mode && self.use_tree_view {
+        // Handle 'h' key: toggle hidden status of selected todo in tree view
+        if key == KeyCode::Char('h') && self.mode != AppMode::Help && !is_in_text_input_mode && self.use_tree_view {
             if let Some(todo) = self.get_selected_todo() {
                 let todo_id = todo.id;
                 if let Err(e) = self.database.toggle_todo_hidden(todo_id) {
@@ -760,8 +760,8 @@ impl App {
             return Ok(());
         }
 
-        // Handle 'A' key: toggle showing/hiding hidden items in tree view
-        if key == KeyCode::Char('A') && self.mode != AppMode::Help && !is_in_text_input_mode && self.use_tree_view {
+        // Handle 'H' key: toggle showing/hiding hidden items in tree view
+        if key == KeyCode::Char('H') && self.mode != AppMode::Help && !is_in_text_input_mode && self.use_tree_view {
             self.show_hidden_items = !self.show_hidden_items;
             self.refresh_todos()?;
             self.update_selection_after_refresh();
@@ -1687,7 +1687,7 @@ impl App {
 
     fn handle_help_key(&mut self, key: KeyCode) -> anyhow::Result<()> {
         match key {
-            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Char('q') => {
+            KeyCode::Esc | KeyCode::Char('a') | KeyCode::Char('q') => {
                 self.mode = self.previous_mode.clone();
             }
             _ => {}
@@ -2521,8 +2521,8 @@ impl App {
             "  d               Delete selected todo".to_string(),
             "  m               Move todo (tree view only)".to_string(),
             "  c               Show/hide completed todos".to_string(),
-            "  a               Toggle hidden status (tree view only)".to_string(),
-            "  A               Toggle showing/hiding hidden todos (tree view only)".to_string(),
+            "  h               Toggle hidden status (tree view only)".to_string(),
+            "  H               Toggle showing/hiding hidden todos (tree view only)".to_string(),
             "".to_string(),
             "SEARCH & MODES".to_string(),
             "  /               Tree search with live highlighting".to_string(),
@@ -2531,11 +2531,11 @@ impl App {
             "  n/N             Navigate search matches (in search/goto mode)".to_string(),
             "".to_string(),
             "GENERAL".to_string(),
-            "  h               Show/hide this help page".to_string(),
+            "  a               Show/hide this help page".to_string(),
             "  q               Quit application".to_string(),
             "  Esc             Cancel current operation".to_string(),
             "".to_string(),
-            "Press h, Esc, or q to close this help".to_string(),
+            "Press a, Esc, or q to close this help".to_string(),
         ];
         
         let help_text = help_content.join("\n");
@@ -2552,7 +2552,7 @@ impl App {
     }
 
     fn draw_help(&self, f: &mut Frame, area: Rect) {
-        let help_text = "Press h for help | q to quit";
+        let help_text = "Press a for help | q to quit";
 
         let help = Paragraph::new(help_text)
             .block(Block::default()
