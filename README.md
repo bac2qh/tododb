@@ -8,12 +8,14 @@ A terminal-based todo application built with Rust, featuring hierarchical task o
 
 ## Features
 
-- **Terminal UI**: Clean, interactive interface using ratatui
+- **Terminal UI**: Clean, interactive interface using ratatui with scrollbars
 - **Tree Structure**: Hierarchical todo organization with move functionality
+- **Vim-Style Navigation**: Half-page scrolling with Ctrl+d/Ctrl+u, ID-based goto
 - **$EDITOR Integration**: Rich markdown editing with your preferred editor
 - **SQLite Database**: Persistent storage with WAL mode
-- **Search**: Real-time search with regex support
-- **Color Themes**: Catppuccin Frappe color scheme
+- **Advanced Search**: Real-time search with regex support, ID modulo navigation
+- **Visual Feedback**: Scrollbars, live highlighting, and Catppuccin Frappe colors
+- **Hidden Todo Management**: Toggle visibility and hide individual todos
 
 ## Quick Start
 
@@ -52,7 +54,8 @@ Database location: `~/.local/share/tododb/todos.db`
 ## Key Bindings
 
 ### Navigation & Selection
-- **j/k** or **↑/↓**: Navigate todos
+- **j/k** or **↑/↓**: Navigate todos one by one
+- **Ctrl+d/Ctrl+u**: Half-page scroll down/up (vim-style)
 - **h/l** or **←/→**: Navigate hierarchy levels
 - **Enter**: View/edit todo in your $EDITOR
 
@@ -62,13 +65,18 @@ Database location: `~/.local/share/tododb/todos.db`
 - **Space**: Toggle completion status
 - **d**: Delete selected todo
 - **c**: Show/hide completed todos
+- **h**: Toggle hidden status of selected todo
+- **H**: Toggle showing/hiding all hidden todos
 
 ### Tree & Search
 - **t**: Expand/collapse tree nodes
 - **f**: Search all todos (flat view)
 - **/**: Search in tree view (live highlighting)
+- **g**: Goto ID mode - type digits to jump to todos by ID % 100
+- **n/N**: Navigate search/goto matches (next/previous)
 
-### Other
+### Help & System
+- **a**: Show/hide help page
 - **q**: Quit application
 - **Esc**: Cancel current operation
 
@@ -81,6 +89,30 @@ Press **m** on any todo in tree view to reorganize your tasks:
 - **j/k** to navigate between valid parents
 - **Enter** to confirm move, **Esc** to cancel
 - **Prevents circular dependencies** automatically
+
+## ID Goto Navigation
+
+Quickly jump to todos using ID modulo 100 (press **g** in tree view):
+- **Type digits** to find todos whose ID % 100 matches your input
+- **Yellow highlighting** shows all matching todos
+- **Underlined** indicates the current match
+- **n/N** to cycle through multiple matches
+- **Perfect for large todo collections** - remember short 2-digit numbers instead of long IDs
+- **Real-time filtering** as you type
+- **Press Enter** to edit the selected todo, **Esc** to cancel
+
+## Visual Features
+
+**Scrollbars**: Visual position indicators appear automatically on all list views
+- **Right-side scrollbars** with up/down arrows (↑/↓)
+- **Real-time position tracking** as you navigate
+- **Shows your location** in long todo lists
+- **Minimal design** that doesn't interfere with content
+
+**Live Search Highlighting**:
+- **Tree search (/)**: Live yellow highlighting of matches
+- **ID goto (g)**: Yellow highlighting with underlined current match
+- **Vim-style n/N navigation** through search results
 
 ## Editor Integration
 
@@ -113,9 +145,13 @@ Includes hierarchical projects, markdown content, and mixed completion status.
 
 **Architecture:**
 - **SQLite** with WAL mode for performance and safety
-- **Tree structure** for hierarchical organization  
+- **Tree structure** for hierarchical organization with move operations
 - **$EDITOR integration** for seamless markdown editing
 - **Terminal UI** with proper suspend/resume handling
+- **Scrollbar widgets** for visual position feedback
+- **Modal navigation** with vim-style keybindings
+- **Real-time search** with regex and ID-based filtering
+- **State management** for complex UI modes and transitions
 
 ## Contributing
 
