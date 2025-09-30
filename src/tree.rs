@@ -57,7 +57,7 @@ impl TodoTreeManager {
             .collect();
     }
 
-    fn build_tree(&self) -> Vec<TreeNode> {
+    fn build_tree(&mut self) -> Vec<TreeNode> {
         let mut children_map: HashMap<Option<i64>, Vec<i64>> = HashMap::new();
         
         // Group todos by parent_id
@@ -74,7 +74,7 @@ impl TodoTreeManager {
             .collect()
     }
 
-    fn build_subtree(&self, children_map: &HashMap<Option<i64>, Vec<i64>>, parent_id: Option<i64>) -> Vec<TreeNode> {
+    fn build_subtree(&mut self, children_map: &HashMap<Option<i64>, Vec<i64>>, parent_id: Option<i64>) -> Vec<TreeNode> {
         let mut nodes = Vec::new();
         
         if let Some(child_ids) = children_map.get(&parent_id) {
@@ -90,6 +90,11 @@ impl TodoTreeManager {
                     let is_expanded = self.expansion_states.get(&child_id)
                         .copied()
                         .unwrap_or(has_incomplete_children);
+
+                    // Save the computed state if we didn't have one before
+                    if !self.expansion_states.contains_key(&child_id) {
+                        self.expansion_states.insert(child_id, is_expanded);
+                    }
                     
                     nodes.push(TreeNode {
                         id: child_id,
@@ -231,7 +236,10 @@ impl TodoTreeManager {
                 todo.completed_at = None;
             }
         }
-        
+
+        // Check and auto-collapse parent if all its children subtrees are completed
+        self.check_and_auto_collapse_parent(todo_id);
+
         // Update only the affected line's display text (no tree rebuild needed)
         if let Some(&line_idx) = self.id_to_line.get(&todo_id) {
             if let Some(line) = self.rendered_lines.get_mut(line_idx) {
@@ -241,6 +249,42 @@ impl TodoTreeManager {
                 }
             }
         }
+    }
+
+    fn check_and_auto_collapse_parent(&mut self, todo_id: i64) {
+        // Find the parent of this todo
+        if let Some(todo) = self.todos.get(&todo_id) {
+            if let Some(parent_id) = todo.parent_id {
+                // Check if all siblings and their entire subtrees are completed
+                // Using the same pattern as has_incomplete_descendants but for completion
+                let all_subtrees_completed = !self.has_incomplete_children(parent_id);
+
+                if all_subtrees_completed {
+                    // Auto-collapse the parent
+                    self.expansion_states.insert(parent_id, false);
+
+                    // Recursively check the parent's parent
+                    self.check_and_auto_collapse_parent(parent_id);
+                }
+            }
+        }
+    }
+
+    fn has_incomplete_children(&self, parent_id: i64) -> bool {
+        // Check all direct children of parent_id
+        for todo in self.todos.values() {
+            if todo.parent_id == Some(parent_id) {
+                // If child is incomplete, return true
+                if !todo.is_completed() {
+                    return true;
+                }
+                // If child has incomplete descendants, return true
+                if self.has_incomplete_children(todo.id) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn toggle_expansion(&mut self, todo_id: i64) -> bool {
