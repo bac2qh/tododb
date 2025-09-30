@@ -360,6 +360,15 @@ impl App {
                 } else {
                     Some(self.find_closest_match_index())
                 };
+
+                // Automatically move cursor to the current match
+                if let Some(current_match_index) = self.current_match_index {
+                    if let Some(&match_todo_id) = self.search_matches.get(current_match_index) {
+                        if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
+                            self.tree_list_state.select(Some(line_index));
+                        }
+                    }
+                }
             }
         }
         Ok(())
@@ -582,6 +591,15 @@ impl App {
                     } else {
                         Some(self.find_closest_goto_match_index())
                     };
+
+                    // Automatically move cursor to the current match
+                    if let Some(current_match_index) = self.goto_current_match_index {
+                        if let Some(&match_todo_id) = self.goto_matches.get(current_match_index) {
+                            if let Some(line_index) = self.tree_manager.get_line_index_for_todo(match_todo_id) {
+                                self.tree_list_state.select(Some(line_index));
+                            }
+                        }
+                    }
                 }
             } else {
                 self.goto_matches.clear();
