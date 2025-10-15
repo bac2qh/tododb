@@ -31,15 +31,10 @@ pub enum AppMode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateFieldFocus {
     Title,
-    DueDate,
+    DueDateRelative,
+    DueDateAbsolute,
     Parent,
     Description,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DueDateSubfield {
-    Relative,
-    Absolute,
 }
 
 pub struct App {
@@ -54,7 +49,8 @@ pub struct App {
     pub previous_mode: AppMode,
     pub input_title: String,
     pub input_description: String,
-    pub input_due_date: String,
+    pub input_due_date_relative: String,
+    pub input_due_date_absolute: String,
     pub current_parent: Option<i64>,
     pub should_quit: bool,
     pub error_message: Option<String>,
@@ -272,6 +268,15 @@ impl App {
     fn parse_relative_duration(input: &str) -> Option<Duration> {
         let input = input.trim().to_lowercase();
 
+        if input.is_empty() {
+            return None;
+        }
+
+        // First, try parsing as a bare number (default to days)
+        if let Ok(number) = input.parse::<i64>() {
+            return Some(Duration::days(number));
+        }
+
         // Extract number and unit
         let len = input.len();
         if len < 2 {
@@ -305,7 +310,8 @@ impl App {
             previous_mode: AppMode::List,
             input_title: String::new(),
             input_description: String::new(),
-            input_due_date: String::new(),
+            input_due_date_relative: String::new(),
+            input_due_date_absolute: String::new(),
             current_parent: None,
             should_quit: false,
             error_message: None,
@@ -965,7 +971,8 @@ impl App {
                 self.mode = AppMode::Create;
                 self.input_title.clear();
                 self.input_description.clear();
-                self.input_due_date.clear();
+                self.input_due_date_relative.clear();
+                self.input_due_date_absolute.clear();
                 self.create_field_focus = CreateFieldFocus::Title;
                 
                 // Auto-fill parent field with currently highlighted task
@@ -1139,7 +1146,14 @@ impl App {
             KeyCode::Esc => self.mode = AppMode::List,
             KeyCode::Enter => {
                 if !self.input_title.trim().is_empty() {
-                    let due_by = Self::parse_due_date(&self.input_due_date);
+                    // Try parsing from relative field first, then absolute field
+                    let due_by = if !self.input_due_date_relative.trim().is_empty() {
+                        Self::parse_due_date(&self.input_due_date_relative)
+                    } else if !self.input_due_date_absolute.trim().is_empty() {
+                        Self::parse_due_date(&self.input_due_date_absolute)
+                    } else {
+                        None
+                    };
                     let new_todo = NewTodo {
                         title: self.input_title.clone(),
                         description: self.input_description.clone(),
@@ -1152,7 +1166,8 @@ impl App {
                     self.input_title.clear();
                     self.input_parent.clear();
                     self.input_description.clear();
-                    self.input_due_date.clear();
+                    self.input_due_date_relative.clear();
+                    self.input_due_date_absolute.clear();
                     self.selected_parent_id = None;
                     self.create_field_focus = CreateFieldFocus::Title;
                 } else {
@@ -1162,9 +1177,12 @@ impl App {
             KeyCode::Tab => {
                 match self.create_field_focus {
                     CreateFieldFocus::Title => {
-                        self.create_field_focus = CreateFieldFocus::DueDate;
+                        self.create_field_focus = CreateFieldFocus::DueDateRelative;
                     }
-                    CreateFieldFocus::DueDate => {
+                    CreateFieldFocus::DueDateRelative => {
+                        self.create_field_focus = CreateFieldFocus::DueDateAbsolute;
+                    }
+                    CreateFieldFocus::DueDateAbsolute => {
                         self.create_field_focus = CreateFieldFocus::Parent;
                     }
                     CreateFieldFocus::Parent => {
@@ -1180,8 +1198,24 @@ impl App {
                     CreateFieldFocus::Title => {
                         self.input_title.push(c);
                     }
-                    CreateFieldFocus::DueDate => {
-                        self.input_due_date.push(c);
+                    CreateFieldFocus::DueDateRelative => {
+                        self.input_due_date_relative.push(c);
+                        // Sync to absolute field
+                        if let Some(due_date) = Self::parse_due_date(&self.input_due_date_relative) {
+                            self.input_due_date_absolute = due_date.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string();
+                        }
+                    }
+                    CreateFieldFocus::DueDateAbsolute => {
+                        self.input_due_date_absolute.push(c);
+                        // Sync to relative field - calculate time difference in days (default unit)
+                        if let Some(due_date) = Self::parse_due_date(&self.input_due_date_absolute) {
+                            let now = Utc::now();
+                            let diff = due_date.signed_duration_since(now);
+                            let days = diff.num_days();
+
+                            // Default to days, show 0 if less than a day
+                            self.input_due_date_relative = format!("{}", days.max(0));
+                        }
                     }
                     CreateFieldFocus::Description => {
                         self.input_description.push(c);
@@ -1206,8 +1240,28 @@ impl App {
                     CreateFieldFocus::Title => {
                         self.input_title.pop();
                     }
-                    CreateFieldFocus::DueDate => {
-                        self.input_due_date.pop();
+                    CreateFieldFocus::DueDateRelative => {
+                        self.input_due_date_relative.pop();
+                        // Sync to absolute field
+                        if let Some(due_date) = Self::parse_due_date(&self.input_due_date_relative) {
+                            self.input_due_date_absolute = due_date.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string();
+                        } else {
+                            self.input_due_date_absolute.clear();
+                        }
+                    }
+                    CreateFieldFocus::DueDateAbsolute => {
+                        self.input_due_date_absolute.pop();
+                        // Sync to relative field - calculate time difference in days (default unit)
+                        if let Some(due_date) = Self::parse_due_date(&self.input_due_date_absolute) {
+                            let now = Utc::now();
+                            let diff = due_date.signed_duration_since(now);
+                            let days = diff.num_days();
+
+                            // Default to days, show 0 if less than a day
+                            self.input_due_date_relative = format!("{}", days.max(0));
+                        } else {
+                            self.input_due_date_relative.clear();
+                        }
                     }
                     CreateFieldFocus::Description => {
                         self.input_description.pop();
@@ -2653,21 +2707,43 @@ impl App {
             .style(Style::default().fg(CatppuccinFrappe::TEXT));
         f.render_widget(title_input, chunks[0]);
 
-        // Due Date field
-        let due_date_style = if self.create_field_focus == CreateFieldFocus::DueDate {
+        // Due Date fields - split into two side-by-side boxes
+        let date_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(chunks[1]);
+
+        // Relative date field (left)
+        let relative_style = if self.create_field_focus == CreateFieldFocus::DueDateRelative {
             Style::default().fg(CatppuccinFrappe::YELLOW)
         } else {
             Style::default().fg(CatppuccinFrappe::BORDER)
         };
-        let due_date_display = if self.input_due_date.is_empty() {
-            "e.g., '2d' (2 days), '1w' (1 week), '3h' (3 hours), or '2025-10-20'".to_string()
+        let relative_display = if self.input_due_date_relative.is_empty() {
+            "e.g., '2' (2 days), '1w', '3h'".to_string()
         } else {
-            self.input_due_date.clone()
+            self.input_due_date_relative.clone()
         };
-        let due_date_input = Paragraph::new(due_date_display.as_str())
-            .block(Block::default().borders(Borders::ALL).title("Due Date (optional)").border_style(due_date_style))
+        let relative_input = Paragraph::new(relative_display.as_str())
+            .block(Block::default().borders(Borders::ALL).title("Relative (optional)").border_style(relative_style))
             .style(Style::default().fg(CatppuccinFrappe::TEXT));
-        f.render_widget(due_date_input, chunks[1]);
+        f.render_widget(relative_input, date_chunks[0]);
+
+        // Absolute date field (right)
+        let absolute_style = if self.create_field_focus == CreateFieldFocus::DueDateAbsolute {
+            Style::default().fg(CatppuccinFrappe::YELLOW)
+        } else {
+            Style::default().fg(CatppuccinFrappe::BORDER)
+        };
+        let absolute_display = if self.input_due_date_absolute.is_empty() {
+            "e.g., '2025-10-20 14:30'".to_string()
+        } else {
+            self.input_due_date_absolute.clone()
+        };
+        let absolute_input = Paragraph::new(absolute_display.as_str())
+            .block(Block::default().borders(Borders::ALL).title("Absolute (optional)").border_style(absolute_style))
+            .style(Style::default().fg(CatppuccinFrappe::TEXT));
+        f.render_widget(absolute_input, date_chunks[1]);
 
         // Parent field  
         let parent_style = if self.create_field_focus == CreateFieldFocus::Parent {
