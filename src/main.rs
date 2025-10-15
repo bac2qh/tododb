@@ -14,7 +14,7 @@ use crossterm::{
 use database::Database;
 use demo_data::DemoDataGenerator;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use std::{env, io, path::PathBuf};
+use std::{env, io, path::PathBuf, time::Duration};
 use ui::App;
 
 fn main() -> anyhow::Result<()> {
@@ -97,14 +97,18 @@ fn run_app<B: ratatui::backend::Backend + std::io::Write>(
         
         terminal.draw(|f| app.draw(f))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                app.handle_key_event(key.code, key.modifiers)?;
-                if app.should_quit {
-                    break;
+        // Poll with 60-second timeout to allow periodic redraws for due date color updates
+        if event::poll(Duration::from_secs(60))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    app.handle_key_event(key.code, key.modifiers)?;
+                    if app.should_quit {
+                        break;
+                    }
                 }
             }
         }
+        // If timeout occurs (no user input for 60 seconds), loop continues and redraws
     }
     Ok(())
 }

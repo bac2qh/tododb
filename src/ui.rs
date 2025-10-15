@@ -381,6 +381,32 @@ impl App {
             .position(self.completed_list_state.selected().unwrap_or(0));
     }
 
+    fn get_due_date_style(&self, todo: &Todo) -> Color {
+        // Only color incomplete todos based on due date
+        if todo.is_completed() {
+            return CatppuccinFrappe::COMPLETED;
+        }
+
+        if let Some(due_by) = todo.due_by {
+            let now = Utc::now();
+            let diff = due_by.signed_duration_since(now);
+
+            if diff.num_seconds() < 0 {
+                // Past due - RED
+                CatppuccinFrappe::RED
+            } else if diff.num_days() < 7 {
+                // Due within 1 week (less than 7 days) - TEAL
+                CatppuccinFrappe::TEAL
+            } else {
+                // More than 1 week away (>= 7 days) - default color
+                CatppuccinFrappe::INCOMPLETE
+            }
+        } else {
+            // No due date - default color
+            CatppuccinFrappe::INCOMPLETE
+        }
+    }
+
     fn get_all_completed_todos(&self) -> anyhow::Result<Vec<Todo>> {
         // Use existing database method but without limit
         let all_todos = self.database.get_all_todos()?;
@@ -2177,7 +2203,7 @@ impl App {
 
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{} [ ] ", todo.id_mod()), Style::default().fg(CatppuccinFrappe::SUBTEXT1)),
-                    Span::styled(todo.title.clone(), Style::default().fg(CatppuccinFrappe::INCOMPLETE)),
+                    Span::styled(todo.title.clone(), Style::default().fg(self.get_due_date_style(todo))),
                     Span::styled(format!(" | Created: {}{} | Parent: {}", created_time, due_by_text, parent_title),
                                Style::default().fg(CatppuccinFrappe::CREATION_TIME)),
                 ]))
@@ -2259,7 +2285,7 @@ impl App {
                             )
                         } else {
                             (
-                                Style::default().fg(CatppuccinFrappe::INCOMPLETE).add_modifier(Modifier::ITALIC),
+                                Style::default().fg(self.get_due_date_style(todo)).add_modifier(Modifier::ITALIC),
                                 Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR).add_modifier(Modifier::ITALIC)
                             )
                         }
@@ -2282,7 +2308,7 @@ impl App {
                             )
                         } else {
                             (
-                                Style::default().fg(CatppuccinFrappe::INCOMPLETE),
+                                Style::default().fg(self.get_due_date_style(todo)),
                                 Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR)
                             )
                         }
@@ -2402,7 +2428,7 @@ impl App {
                             )
                         } else {
                             (
-                                Style::default().fg(CatppuccinFrappe::INCOMPLETE).add_modifier(Modifier::ITALIC),
+                                Style::default().fg(self.get_due_date_style(todo)).add_modifier(Modifier::ITALIC),
                                 Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR).add_modifier(Modifier::ITALIC)
                             )
                         }
@@ -2428,7 +2454,7 @@ impl App {
                                 // Other matches - yellow and bold
                                 Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::BOLD)
                             } else {
-                                Style::default().fg(CatppuccinFrappe::INCOMPLETE)
+                                Style::default().fg(self.get_due_date_style(todo))
                             },
                             Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR)
                         )
@@ -2556,7 +2582,7 @@ impl App {
                                 // Other matches - yellow and bold
                                 Style::default().fg(CatppuccinFrappe::YELLOW).add_modifier(Modifier::BOLD)
                             } else {
-                                Style::default().fg(CatppuccinFrappe::INCOMPLETE)
+                                Style::default().fg(self.get_due_date_style(todo))
                             },
                             Style::default().fg(CatppuccinFrappe::PARENT_INDICATOR)
                         )
