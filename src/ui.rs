@@ -2733,7 +2733,12 @@ impl App {
         } else {
             Style::default().fg(CatppuccinFrappe::BORDER)
         };
-        let title_input = Paragraph::new(self.input_title.as_str())
+        let title_display = if self.input_title.is_empty() {
+            "e.g., 'p0 Fix critical bug' (p0=highest priority)".to_string()
+        } else {
+            self.input_title.clone()
+        };
+        let title_input = Paragraph::new(title_display.as_str())
             .block(Block::default().borders(Borders::ALL).title("Title").border_style(title_style))
             .style(Style::default().fg(CatppuccinFrappe::TEXT));
         f.render_widget(title_input, chunks[0]);

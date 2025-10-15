@@ -6,6 +6,7 @@ pub struct TreeNode {
     pub id: i64,
     pub children: Vec<TreeNode>,
     pub is_expanded: bool,
+    pub priority: Option<u32>,  // Priority extracted from title (e.g., p0, p1, p2)
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +33,44 @@ impl TodoTreeManager {
             rendered_lines: Vec::new(),
             id_to_line: HashMap::new(),
             expansion_states: HashMap::new(),
+        }
+    }
+
+    /// Parse priority from title. Expects format: p0, p1, P0, P1 as first word
+    fn parse_priority(title: &str) -> Option<u32> {
+        let first_word = title.split_whitespace().next()?;
+        let first_word_lower = first_word.to_lowercase();
+
+        if first_word_lower.starts_with('p') && first_word_lower.len() > 1 {
+            let num_str = &first_word_lower[1..];
+            num_str.parse::<u32>().ok()
+        } else {
+            None
+        }
+    }
+
+    /// Strip priority prefix from title for display
+    fn strip_priority_from_title(title: &str) -> String {
+        let first_word = title.split_whitespace().next();
+        if let Some(word) = first_word {
+            let word_lower = word.to_lowercase();
+            if word_lower.starts_with('p') && word_lower.len() > 1 {
+                let num_str = &word_lower[1..];
+                if num_str.parse::<u32>().is_ok() {
+                    // Priority found, strip it and return rest of title
+                    return title[word.len()..].trim_start().to_string();
+                }
+            }
+        }
+        title.to_string()
+    }
+
+    /// Format priority for display (e.g., P0, P1)
+    fn format_priority(priority: Option<u32>) -> String {
+        if let Some(p) = priority {
+            format!("[P{}] ", p)
+        } else {
+            String::new()
         }
     }
 
@@ -95,21 +134,49 @@ impl TodoTreeManager {
                     if !self.expansion_states.contains_key(&child_id) {
                         self.expansion_states.insert(child_id, is_expanded);
                     }
-                    
+
+                    // Parse priority from title
+                    let priority = if let Some(todo) = self.todos.get(&child_id) {
+                        Self::parse_priority(&todo.title)
+                    } else {
+                        None
+                    };
+
                     nodes.push(TreeNode {
                         id: child_id,
                         children,
                         is_expanded,
+                        priority,
                     });
                 }
             }
         }
 
-        // Sort by creation time (most recent first)
+        // Sort by priority first (ascending: p0, p1, p2...), then by creation time (descending)
         nodes.sort_by(|a, b| {
-            let todo_a = &self.todos[&a.id];
-            let todo_b = &self.todos[&b.id];
-            todo_b.created_at.cmp(&todo_a.created_at)
+            // Compare priorities first
+            match (a.priority, b.priority) {
+                (Some(pa), Some(pb)) => {
+                    // Both have priority - sort by priority ascending (p0 first)
+                    match pa.cmp(&pb) {
+                        std::cmp::Ordering::Equal => {
+                            // Same priority - sort by creation time descending
+                            let todo_a = &self.todos[&a.id];
+                            let todo_b = &self.todos[&b.id];
+                            todo_b.created_at.cmp(&todo_a.created_at)
+                        }
+                        other => other
+                    }
+                }
+                (Some(_), None) => std::cmp::Ordering::Less,    // Priority comes before no priority
+                (None, Some(_)) => std::cmp::Ordering::Greater, // No priority comes after priority
+                (None, None) => {
+                    // Neither has priority - sort by creation time descending
+                    let todo_a = &self.todos[&a.id];
+                    let todo_b = &self.todos[&b.id];
+                    todo_b.created_at.cmp(&todo_a.created_at)
+                }
+            }
         });
 
         nodes
@@ -163,13 +230,16 @@ impl TodoTreeManager {
             // Generate prefix based on tree position
             let prefix = self.generate_prefix(&ancestor_continuations, is_last_sibling, depth);
             
-            // Format todo display text with expansion indicator
+            // Format todo display text with expansion indicator and priority
             let status_icon = if todo.is_completed() { "[✓]" } else { "[ ]" };
             let expansion_indicator = if !node.children.is_empty() {
                 if node.is_expanded { "▼ " } else { "▶ " }
             } else { "" };
-            
-            let display_text = format!("{} {} {}{}", todo.id_mod(), status_icon, expansion_indicator, todo.title);
+
+            let priority_str = Self::format_priority(node.priority);
+            let title_without_priority = Self::strip_priority_from_title(&todo.title);
+
+            let display_text = format!("{} {} {}{}{}", todo.id_mod(), status_icon, expansion_indicator, priority_str, title_without_priority);
             
             lines.push(RenderedLine {
                 todo_id: node.id,
@@ -245,7 +315,10 @@ impl TodoTreeManager {
             if let Some(line) = self.rendered_lines.get_mut(line_idx) {
                 if let Some(todo) = self.todos.get(&todo_id) {
                     let status_icon = if todo.is_completed() { "[✓]" } else { "[ ]" };
-                    line.display_text = format!("{} {} {}", todo.id_mod(), status_icon, todo.title);
+                    let priority = Self::parse_priority(&todo.title);
+                    let priority_str = Self::format_priority(priority);
+                    let title_without_priority = Self::strip_priority_from_title(&todo.title);
+                    line.display_text = format!("{} {} {}{}", todo.id_mod(), status_icon, priority_str, title_without_priority);
                 }
             }
         }
