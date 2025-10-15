@@ -1308,9 +1308,14 @@ impl App {
         match key {
             KeyCode::Char('y') => {
                 if let Some(todo) = self.get_selected_todo() {
-                    self.database.delete_todo(todo.id)?;
-                    self.refresh_todos()?;
-                    self.update_selection_after_refresh();
+                    // Check if the task has children before deleting
+                    if self.database.has_children(todo.id)? {
+                        self.error_message = Some("Cannot delete: task has children. Delete children first.".to_string());
+                    } else {
+                        self.database.delete_todo(todo.id)?;
+                        self.refresh_todos()?;
+                        self.update_selection_after_refresh();
+                    }
                 }
                 self.mode = AppMode::List;
             }

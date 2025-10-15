@@ -190,6 +190,15 @@ impl Database {
         Ok(())
     }
 
+    pub fn has_children(&self, id: i64) -> anyhow::Result<bool> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM todos WHERE parent_id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
     pub fn delete_todo(&self, id: i64) -> anyhow::Result<()> {
         self.conn.execute("DELETE FROM todos WHERE id = ?1", params![id])?;
         Ok(())
