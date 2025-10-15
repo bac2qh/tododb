@@ -11,6 +11,7 @@ pub fn test_functionality() -> anyhow::Result<()> {
         title: "Learn Rust".to_string(),
         description: "Master the Rust programming language".to_string(),
         parent_id: None,
+        due_by: None,
     })?;
     println!("Created todo 1 with ID: {}", todo1_id);
     
@@ -18,6 +19,7 @@ pub fn test_functionality() -> anyhow::Result<()> {
         title: "Build todo app".to_string(),
         description: "Create a terminal-based todo application".to_string(),
         parent_id: None,
+        due_by: None,
     })?;
     println!("Created todo 2 with ID: {}", todo2_id);
     
@@ -26,6 +28,7 @@ pub fn test_functionality() -> anyhow::Result<()> {
         title: "Learn ownership".to_string(),
         description: "Understand Rust's ownership system".to_string(),
         parent_id: Some(todo1_id),
+        due_by: None,
     })?;
     println!("Created subtodo with ID: {}", subtodo_id);
     

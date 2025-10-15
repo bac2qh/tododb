@@ -13,42 +13,49 @@ pub fn test_tree_functionality() -> anyhow::Result<()> {
         title: "Build Web Application".to_string(),
         description: "Main project".to_string(),
         parent_id: None,
+        due_by: None,
     })?;
     
     let frontend_id = database.create_todo(NewTodo {
         title: "Frontend Development".to_string(),
         description: "UI and client-side logic".to_string(),
         parent_id: Some(project_id),
+        due_by: None,
     })?;
     
     let backend_id = database.create_todo(NewTodo {
         title: "Backend Development".to_string(),
         description: "Server-side logic".to_string(),
         parent_id: Some(project_id),
+        due_by: None,
     })?;
     
     let _react_id = database.create_todo(NewTodo {
         title: "Setup React".to_string(),
         description: "Initialize React project".to_string(),
         parent_id: Some(frontend_id),
+        due_by: None,
     })?;
     
     let _styling_id = database.create_todo(NewTodo {
         title: "Add Styling".to_string(),
         description: "CSS and design".to_string(),
         parent_id: Some(frontend_id),
+        due_by: None,
     })?;
     
     let _api_id = database.create_todo(NewTodo {
         title: "Create REST API".to_string(),
         description: "Backend API endpoints".to_string(),
         parent_id: Some(backend_id),
+        due_by: None,
     })?;
     
     let _db_id = database.create_todo(NewTodo {
         title: "Setup Database".to_string(),
         description: "Configure database schema".to_string(),
         parent_id: Some(backend_id),
+        due_by: None,
     })?;
     
     // Test tree functionality

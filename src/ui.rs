@@ -1,7 +1,7 @@
 use crate::database::{Database, NewTodo, Todo};
 use crate::tree::TodoTreeManager;
 use crate::colors::CatppuccinFrappe;
-use chrono::Local;
+use chrono::{Local, Utc, DateTime, Duration};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -31,8 +31,15 @@ pub enum AppMode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateFieldFocus {
     Title,
+    DueDate,
     Parent,
     Description,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DueDateSubfield {
+    Relative,
+    Absolute,
 }
 
 pub struct App {
@@ -47,6 +54,7 @@ pub struct App {
     pub previous_mode: AppMode,
     pub input_title: String,
     pub input_description: String,
+    pub input_due_date: String,
     pub current_parent: Option<i64>,
     pub should_quit: bool,
     pub error_message: Option<String>,
@@ -235,6 +243,55 @@ impl App {
         Ok((title, description.trim().to_string()))
     }
 
+    fn parse_due_date(input: &str) -> Option<DateTime<Utc>> {
+        let input = input.trim();
+        if input.is_empty() {
+            return None;
+        }
+
+        // Try relative date parsing first (e.g., "2d", "1w", "3h", "30m")
+        if let Some(duration) = Self::parse_relative_duration(input) {
+            return Some(Utc::now() + duration);
+        }
+
+        // Try absolute date parsing
+        // Format: "YYYY-MM-DD" or "YYYY-MM-DD HH:MM"
+        if let Ok(dt) = chrono::NaiveDate::parse_from_str(input, "%Y-%m-%d") {
+            // Parse date only, set time to end of day (23:59:59)
+            let naive_datetime = dt.and_hms_opt(23, 59, 59)?;
+            return Some(DateTime::<Utc>::from_naive_utc_and_offset(naive_datetime, Utc));
+        }
+
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(input, "%Y-%m-%d %H:%M") {
+            return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+        }
+
+        None
+    }
+
+    fn parse_relative_duration(input: &str) -> Option<Duration> {
+        let input = input.trim().to_lowercase();
+
+        // Extract number and unit
+        let len = input.len();
+        if len < 2 {
+            return None;
+        }
+
+        let unit = &input[len - 1..];
+        let number_str = &input[..len - 1];
+
+        let number: i64 = number_str.parse().ok()?;
+
+        match unit {
+            "m" => Some(Duration::minutes(number)),
+            "h" => Some(Duration::hours(number)),
+            "d" => Some(Duration::days(number)),
+            "w" => Some(Duration::weeks(number)),
+            _ => None,
+        }
+    }
+
     pub fn new(database: Database) -> anyhow::Result<Self> {
         let mut app = App {
             database,
@@ -248,6 +305,7 @@ impl App {
             previous_mode: AppMode::List,
             input_title: String::new(),
             input_description: String::new(),
+            input_due_date: String::new(),
             current_parent: None,
             should_quit: false,
             error_message: None,
@@ -907,6 +965,7 @@ impl App {
                 self.mode = AppMode::Create;
                 self.input_title.clear();
                 self.input_description.clear();
+                self.input_due_date.clear();
                 self.create_field_focus = CreateFieldFocus::Title;
                 
                 // Auto-fill parent field with currently highlighted task
@@ -1080,10 +1139,12 @@ impl App {
             KeyCode::Esc => self.mode = AppMode::List,
             KeyCode::Enter => {
                 if !self.input_title.trim().is_empty() {
+                    let due_by = Self::parse_due_date(&self.input_due_date);
                     let new_todo = NewTodo {
                         title: self.input_title.clone(),
                         description: self.input_description.clone(),
                         parent_id: self.selected_parent_id,
+                        due_by,
                     };
                     self.database.create_todo(new_todo)?;
                     self.refresh_todos()?;
@@ -1091,6 +1152,7 @@ impl App {
                     self.input_title.clear();
                     self.input_parent.clear();
                     self.input_description.clear();
+                    self.input_due_date.clear();
                     self.selected_parent_id = None;
                     self.create_field_focus = CreateFieldFocus::Title;
                 } else {
@@ -1100,6 +1162,9 @@ impl App {
             KeyCode::Tab => {
                 match self.create_field_focus {
                     CreateFieldFocus::Title => {
+                        self.create_field_focus = CreateFieldFocus::DueDate;
+                    }
+                    CreateFieldFocus::DueDate => {
                         self.create_field_focus = CreateFieldFocus::Parent;
                     }
                     CreateFieldFocus::Parent => {
@@ -1114,6 +1179,9 @@ impl App {
                 match self.create_field_focus {
                     CreateFieldFocus::Title => {
                         self.input_title.push(c);
+                    }
+                    CreateFieldFocus::DueDate => {
+                        self.input_due_date.push(c);
                     }
                     CreateFieldFocus::Description => {
                         self.input_description.push(c);
@@ -1137,6 +1205,9 @@ impl App {
                 match self.create_field_focus {
                     CreateFieldFocus::Title => {
                         self.input_title.pop();
+                    }
+                    CreateFieldFocus::DueDate => {
+                        self.input_due_date.pop();
                     }
                     CreateFieldFocus::Description => {
                         self.input_description.pop();
@@ -2041,14 +2112,19 @@ impl App {
             .iter()
             .map(|todo| {
                 let created_time = todo.created_at.with_timezone(&Local).format("%m/%d %H:%M").to_string();
+                let due_by_text = if let Some(due_by) = todo.due_by {
+                    format!(" | Due: {}", due_by.with_timezone(&Local).format("%m/%d %H:%M"))
+                } else {
+                    String::new()
+                };
                 let parent_title = self.database.get_parent_title(todo.parent_id)
                     .unwrap_or(None)
                     .unwrap_or_else(|| "null".to_string());
-                
+
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{} [ ] ", todo.id_mod()), Style::default().fg(CatppuccinFrappe::SUBTEXT1)),
                     Span::styled(todo.title.clone(), Style::default().fg(CatppuccinFrappe::INCOMPLETE)),
-                    Span::styled(format!(" | Created: {} | Parent: {}", created_time, parent_title), 
+                    Span::styled(format!(" | Created: {}{} | Parent: {}", created_time, due_by_text, parent_title),
                                Style::default().fg(CatppuccinFrappe::CREATION_TIME)),
                 ]))
             })
@@ -2114,7 +2190,12 @@ impl App {
                 let index = if self.mode == AppMode::Move { tree_index + 1 } else { tree_index };
                 if let Some(todo) = self.tree_manager.get_todo_by_id(line.todo_id) {
                     let created_time = todo.created_at.with_timezone(&Local).format("%m/%d %H:%M").to_string();
-                    
+                    let due_by_text = if let Some(due_by) = todo.due_by {
+                        format!(" | Due: {}", due_by.with_timezone(&Local).format("%m/%d %H:%M"))
+                    } else {
+                        String::new()
+                    };
+
                     let (display_style, prefix_style) = if todo.hidden && self.show_hidden_items {
                         // Hidden items shown with italic styling
                         if todo.is_completed() {
@@ -2156,7 +2237,7 @@ impl App {
                     ListItem::new(Line::from(vec![
                         Span::styled(&line.prefix, prefix_style),
                         Span::styled(&line.display_text, display_style),
-                        Span::styled(format!(" | Created: {}", created_time), 
+                        Span::styled(format!(" | Created: {}{}", created_time, due_by_text),
                                    Style::default().fg(CatppuccinFrappe::CREATION_TIME)),
                     ]))
                 } else {
@@ -2245,6 +2326,11 @@ impl App {
             .map(|line| {
                 if let Some(todo) = self.tree_manager.get_todo_by_id(line.todo_id) {
                     let created_time = todo.created_at.with_timezone(&Local).format("%m/%d %H:%M").to_string();
+                    let due_by_text = if let Some(due_by) = todo.due_by {
+                        format!(" | Due: {}", due_by.with_timezone(&Local).format("%m/%d %H:%M"))
+                    } else {
+                        String::new()
+                    };
 
                     // Check if this todo matches the goto query
                     let is_match = self.goto_matches.contains(&line.todo_id);
@@ -2297,7 +2383,7 @@ impl App {
                     ListItem::new(Line::from(vec![
                         Span::styled(&line.prefix, prefix_style),
                         Span::styled(&line.display_text, display_style),
-                        Span::styled(format!(" | Created: {}", created_time),
+                        Span::styled(format!(" | Created: {}{}", created_time, due_by_text),
                                    Style::default().fg(CatppuccinFrappe::CREATION_TIME)),
                     ]))
                 } else {
@@ -2381,7 +2467,12 @@ impl App {
             .map(|line| {
                 if let Some(todo) = self.tree_manager.get_todo_by_id(line.todo_id) {
                     let created_time = todo.created_at.with_timezone(&Local).format("%m/%d %H:%M").to_string();
-                    
+                    let due_by_text = if let Some(due_by) = todo.due_by {
+                        format!(" | Due: {}", due_by.with_timezone(&Local).format("%m/%d %H:%M"))
+                    } else {
+                        String::new()
+                    };
+
                     // Check if this todo matches the search
                     let is_match = self.search_matches.contains(&line.todo_id);
                     let is_current_match = self.current_match_index
@@ -2420,7 +2511,7 @@ impl App {
                     ListItem::new(Line::from(vec![
                         Span::styled(&line.prefix, prefix_style),
                         Span::styled(&line.display_text, display_style),
-                        Span::styled(format!(" | Created: {}", created_time), 
+                        Span::styled(format!(" | Created: {}{}", created_time, due_by_text),
                                    Style::default().fg(CatppuccinFrappe::CREATION_TIME)),
                     ]))
                 } else {
@@ -2486,20 +2577,25 @@ impl App {
                     "Unknown".to_string()
                 };
                 let created_time = todo.created_at.with_timezone(&Local).format("%m/%d %H:%M").to_string();
+                let due_by_text = if let Some(due_by) = todo.due_by {
+                    format!(" | Due: {}", due_by.with_timezone(&Local).format("%m/%d %H:%M"))
+                } else {
+                    String::new()
+                };
                 let parent_title = self.database.get_parent_title(todo.parent_id)
                     .unwrap_or(None)
                     .unwrap_or_else(|| "null".to_string());
-                
+
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{} [✓] ", todo.id_mod()),
                                Style::default().fg(CatppuccinFrappe::COMPLETED)),
                     Span::styled(
-                        todo.title.clone(), 
+                        todo.title.clone(),
                         Style::default().fg(CatppuccinFrappe::COMPLETED).add_modifier(Modifier::CROSSED_OUT)
                     ),
                     Span::styled(
-                        format!(" | Created: {} | Completed: {} | Parent: {}", 
-                               created_time, completed_time, parent_title),
+                        format!(" | Created: {} | Completed: {}{} | Parent: {}",
+                               created_time, completed_time, due_by_text, parent_title),
                         Style::default().fg(CatppuccinFrappe::SUBTEXT0)
                     ),
                 ]))
@@ -2543,7 +2639,7 @@ impl App {
     fn draw_create_mode(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(0)])
+            .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Length(3), Constraint::Min(0)])
             .split(area);
 
         // Title field
@@ -2556,6 +2652,22 @@ impl App {
             .block(Block::default().borders(Borders::ALL).title("Title").border_style(title_style))
             .style(Style::default().fg(CatppuccinFrappe::TEXT));
         f.render_widget(title_input, chunks[0]);
+
+        // Due Date field
+        let due_date_style = if self.create_field_focus == CreateFieldFocus::DueDate {
+            Style::default().fg(CatppuccinFrappe::YELLOW)
+        } else {
+            Style::default().fg(CatppuccinFrappe::BORDER)
+        };
+        let due_date_display = if self.input_due_date.is_empty() {
+            "e.g., '2d' (2 days), '1w' (1 week), '3h' (3 hours), or '2025-10-20'".to_string()
+        } else {
+            self.input_due_date.clone()
+        };
+        let due_date_input = Paragraph::new(due_date_display.as_str())
+            .block(Block::default().borders(Borders::ALL).title("Due Date (optional)").border_style(due_date_style))
+            .style(Style::default().fg(CatppuccinFrappe::TEXT));
+        f.render_widget(due_date_input, chunks[1]);
 
         // Parent field  
         let parent_style = if self.create_field_focus == CreateFieldFocus::Parent {
@@ -2571,7 +2683,7 @@ impl App {
         let parent_input = Paragraph::new(parent_display.as_str())
             .block(Block::default().borders(Borders::ALL).title("Parent (optional)").border_style(parent_style))
             .style(Style::default().fg(CatppuccinFrappe::TEXT));
-        f.render_widget(parent_input, chunks[1]);
+        f.render_widget(parent_input, chunks[2]);
 
         // Description field
         let desc_style = if self.create_field_focus == CreateFieldFocus::Description {
@@ -2582,7 +2694,7 @@ impl App {
         let description_input = Paragraph::new(self.input_description.as_str())
             .block(Block::default().borders(Borders::ALL).title("Description (optional)").border_style(desc_style))
             .style(Style::default().fg(CatppuccinFrappe::TEXT));
-        f.render_widget(description_input, chunks[2]);
+        f.render_widget(description_input, chunks[3]);
     }
 
     fn draw_confirm_delete(&self, f: &mut Frame, area: Rect) {
@@ -2629,21 +2741,26 @@ impl App {
                 } else {
                     String::new()
                 };
+                let due_by_text = if let Some(due_by) = todo.due_by {
+                    format!(" | Due: {}", due_by.with_timezone(&Local).format("%m/%d %H:%M"))
+                } else {
+                    String::new()
+                };
                 let parent_title = self.database.get_parent_title(todo.parent_id)
                     .unwrap_or(None)
                     .unwrap_or_else(|| "null".to_string());
-                
+
                 let status_icon = if todo.is_completed() { "[✓]" } else { "[ ]" };
                 let title_style = if todo.is_completed() {
                     Style::default().fg(Color::Gray).add_modifier(Modifier::CROSSED_OUT)
                 } else {
                     Style::default()
                 };
-                
+
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{} {} ", todo.id_mod(), status_icon)),
                     Span::styled(todo.title.clone(), title_style),
-                    Span::raw(format!(" | Created: {}{} | Parent: {}", created_time, completed_time, parent_title)),
+                    Span::raw(format!(" | Created: {}{}{} | Parent: {}", created_time, due_by_text, completed_time, parent_title)),
                 ]))
             })
             .collect();
@@ -2684,21 +2801,26 @@ impl App {
                 } else {
                     String::new()
                 };
+                let due_by_text = if let Some(due_by) = todo.due_by {
+                    format!(" | Due: {}", due_by.with_timezone(&Local).format("%m/%d %H:%M"))
+                } else {
+                    String::new()
+                };
                 let parent_title = self.database.get_parent_title(todo.parent_id)
                     .unwrap_or(None)
                     .unwrap_or_else(|| "null".to_string());
-                
+
                 let status_icon = if todo.is_completed() { "[✓]" } else { "[ ]" };
                 let title_style = if todo.is_completed() {
                     Style::default().fg(Color::Gray).add_modifier(Modifier::CROSSED_OUT)
                 } else {
                     Style::default()
                 };
-                
+
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{} {} ", todo.id_mod(), status_icon)),
                     Span::styled(todo.title.clone(), title_style),
-                    Span::raw(format!(" | Created: {}{} | Parent: {}", created_time, completed_time, parent_title)),
+                    Span::raw(format!(" | Created: {}{}{} | Parent: {}", created_time, due_by_text, completed_time, parent_title)),
                 ]))
             })
             .collect();

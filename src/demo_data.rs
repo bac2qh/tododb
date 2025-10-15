@@ -59,6 +59,7 @@ Complete redesign of the company e-commerce platform with modern UX/UI
 - [Project Slack Channel](https://company.slack.com/channels/web-redesign)
 - [GitHub Repository](https://github.com/company/ecommerce-redesign)"#.to_string(),
             parent_id: None,
+            due_by: None,
         })?;
         project_ids.insert("web_project".to_string(), web_project_id);
 
@@ -85,6 +86,7 @@ Complete redesign of the company e-commerce platform with modern UX/UI
 - Largest Contentful Paint < 2.5s
 - Cumulative Layout Shift < 0.1"#.to_string(),
             parent_id: Some(web_project_id),
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -117,6 +119,7 @@ src/
 - [Tailwind CSS Installation](https://tailwindcss.com/docs/installation)
 - [Zustand Documentation](https://docs.pmnd.rs/zustand/getting-started/introduction)"#.to_string(),
             parent_id: Some(frontend_id),
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -156,6 +159,7 @@ Use Framer Motion for:
 ### Design Reference
 [Cart Component Figma](https://figma.com/file/cart-component)"#.to_string(),
             parent_id: Some(frontend_id),
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -205,6 +209,7 @@ DELETE /api/user/account
 - [NextAuth.js Documentation](https://next-auth.js.org/)
 - [JWT Best Practices](https://tools.ietf.org/html/rfc8725)"#.to_string(),
             parent_id: Some(frontend_id),
+            due_by: None,
         })?;
 
         // Backend tasks
@@ -233,6 +238,7 @@ DELETE /api/user/account
 - Migration strategy for schema changes
 - Backup and recovery procedures"#.to_string(),
             parent_id: Some(web_project_id),
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -293,6 +299,7 @@ Use Prisma migrations for schema versioning and deployment
 - [PostgreSQL Documentation](https://www.postgresql.org/docs/)
 - [Database Design Tool](https://dbdiagram.io/)"#.to_string(),
             parent_id: Some(backend_id),
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -367,6 +374,7 @@ Generate API docs with Swagger/OpenAPI specification
 - [REST API Design Guidelines](https://restfulapi.net/)
 - [HTTP Status Codes](https://httpstatuses.com/)"#.to_string(),
             parent_id: Some(backend_id),
+            due_by: None,
         })?;
 
         // 2. Mobile App Project
@@ -407,6 +415,7 @@ Create a comprehensive fitness tracking app that helps users monitor workouts, n
 - [Product Requirements Doc](https://notion.so/fitness-tracker-prd)
 - [Technical Architecture](https://miro.com/fitness-app-architecture)"#.to_string(),
             parent_id: None,
+            due_by: None,
         })?;
         project_ids.insert("mobile_project".to_string(), mobile_project_id);
 
@@ -475,6 +484,7 @@ npx react-native start --reset-cache
 - [TypeScript with React Native](https://reactnative.dev/docs/typescript)
 - [NativeWind Setup Guide](https://www.nativewind.dev/quick-starts/react-native-cli)"#.to_string(),
             parent_id: Some(mobile_project_id),
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -560,6 +570,7 @@ interface WorkoutSet {
 - [React Native AsyncStorage](https://react-native-async-storage.github.io/async-storage/)
 - [Victory Native Charts](https://formidable.com/open-source/victory/docs/native/)"#.to_string(),
             parent_id: Some(mobile_project_id),
+            due_by: None,
         })?;
 
         // 3. DevOps Project  
@@ -608,6 +619,7 @@ Migrate existing Docker Swarm infrastructure to Kubernetes for better scalabilit
 - Rollback procedures for each service
 - Team training on Kubernetes operations"#.to_string(),
             parent_id: None,
+            due_by: None,
         })?;
         project_ids.insert("devops_project".to_string(), devops_project_id);
 
@@ -695,6 +707,7 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/master/
 - [Terraform EKS Module](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest)
 - [Kubernetes Security Checklist](https://kubernetes.io/docs/concepts/security/security-checklist/)"#.to_string(),
             parent_id: Some(devops_project_id),
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -827,6 +840,7 @@ Define Service Level Indicators and Objectives:
 - [Grafana Dashboard Best Practices](https://grafana.com/docs/grafana/latest/best-practices/)
 - [SRE Book - Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/)"#.to_string(),
             parent_id: Some(devops_project_id),
+            due_by: None,
         })?;
 
         Ok(project_ids)
@@ -868,6 +882,7 @@ Define Service Level Indicators and Objectives:
 - Network with other developers in local community
 - Mentor junior developers at work"#.to_string(),
             parent_id: None,
+            due_by: None,
         })?;
 
         // Health subtasks
@@ -928,6 +943,7 @@ Define Service Level Indicators and Objectives:
 - [7 Minute Workout App](https://apps.apple.com/us/app/seven-7-minute-workout/id650627525)
 - [MyFitnessPal](https://www.myfitnesspal.com/) for nutrition tracking"#.to_string(),
             parent_id: Some(personal_dev_id),
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -989,6 +1005,7 @@ Define Service Level Indicators and Objectives:
 - [Habit Tracker Apps](https://www.habitica.com/)
 - [TED Talk: The Power of Small Wins](https://www.ted.com/talks/bj_fogg_tiny_habits_the_small_changes_that_change_everything)"#.to_string(),
             parent_id: Some(personal_dev_id),
+            due_by: None,
         })?;
 
         // Finance task
@@ -1078,6 +1095,7 @@ Define Service Level Indicators and Objectives:
 **Week 3:** Set up automatic investing
 **Week 4:** Create tracking spreadsheet and review schedule"#.to_string(),
             parent_id: Some(personal_dev_id),
+            due_by: None,
         })?;
 
         Ok(())
@@ -1128,6 +1146,7 @@ Define Service Level Indicators and Objectives:
 - Monthly tech meetups and conferences
 - Quarterly skill assessments and goal adjustments"#.to_string(),
             parent_id: None,
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -1233,6 +1252,7 @@ Define Service Level Indicators and Objectives:
 - Better TOML (Cargo.toml syntax highlighting)
 - Error Lens (inline error display)"#.to_string(),
             parent_id: Some(learning_id),
+            due_by: None,
         })?;
 
         self.db.create_todo(NewTodo {
@@ -1396,6 +1416,7 @@ Define Service Level Indicators and Objectives:
 - **Sundays:** 2 hours (practice questions + review)
 - **Total:** ~12 hours per week for 8 weeks"#.to_string(),
             parent_id: Some(learning_id),
+            due_by: None,
         })?;
 
         Ok(())

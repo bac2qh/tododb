@@ -10,6 +10,7 @@ pub struct Todo {
     pub description: String,
     pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
+    pub due_by: Option<DateTime<Utc>>,
     pub parent_id: Option<i64>,
     pub hidden: bool,
 }
@@ -22,8 +23,9 @@ impl Todo {
             description: row.get(2)?,
             created_at: row.get(3)?,
             completed_at: row.get(4)?,
-            parent_id: row.get(5)?,
-            hidden: row.get(6).unwrap_or(false),
+            due_by: row.get(5).ok(),
+            parent_id: row.get(6)?,
+            hidden: row.get(7).unwrap_or(false),
         })
     }
 
@@ -41,6 +43,7 @@ pub struct NewTodo {
     pub title: String,
     pub description: String,
     pub parent_id: Option<i64>,
+    pub due_by: Option<DateTime<Utc>>,
 }
 
 pub struct Database {
@@ -82,6 +85,7 @@ impl Database {
                 description TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 completed_at TEXT,
+                due_by TEXT,
                 parent_id INTEGER,
                 hidden INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (parent_id) REFERENCES todos (id)
@@ -95,19 +99,26 @@ impl Database {
             [],
         );
 
+        // Add due_by column to existing tables (migration)
+        let _ = self.conn.execute(
+            "ALTER TABLE todos ADD COLUMN due_by TEXT",
+            [],
+        );
+
         Ok(())
     }
 
     pub fn create_todo(&self, new_todo: NewTodo) -> anyhow::Result<i64> {
         let now = Utc::now();
         let _id = self.conn.execute(
-            "INSERT INTO todos (title, description, created_at, parent_id, hidden) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO todos (title, description, created_at, parent_id, hidden, due_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 new_todo.title,
                 new_todo.description,
                 now,
                 new_todo.parent_id,
-                false
+                false,
+                new_todo.due_by
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -115,31 +126,31 @@ impl Database {
 
     pub fn get_all_todos(&self) -> anyhow::Result<Vec<Todo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+            "SELECT id, title, description, created_at, completed_at, due_by, parent_id, hidden
              FROM todos
              ORDER BY created_at DESC"
         )?;
-        
+
         let todo_iter = stmt.query_map([], |row| Todo::from_row(row))?;
-        
+
         let mut todos = Vec::new();
         for todo in todo_iter {
             todos.push(todo?);
         }
-        
+
         Ok(todos)
     }
 
 
     pub fn get_todo_by_id(&self, id: i64) -> anyhow::Result<Option<Todo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+            "SELECT id, title, description, created_at, completed_at, due_by, parent_id, hidden
              FROM todos
              WHERE id = ?1"
         )?;
-        
+
         let mut rows = stmt.query_map([id], |row| Todo::from_row(row))?;
-        
+
         match rows.next() {
             Some(row) => Ok(Some(row?)),
             None => Ok(None),
@@ -223,11 +234,11 @@ impl Database {
 
     pub fn get_incomplete_todos(&self, parent_id: Option<i64>) -> anyhow::Result<Vec<Todo>> {
         let mut todos = Vec::new();
-        
+
         match parent_id {
             Some(pid) => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+                    "SELECT id, title, description, created_at, completed_at, due_by, parent_id, hidden
                      FROM todos
                      WHERE parent_id = ?1 AND completed_at IS NULL
                      ORDER BY created_at DESC"
@@ -239,7 +250,7 @@ impl Database {
             },
             None => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+                    "SELECT id, title, description, created_at, completed_at, due_by, parent_id, hidden
                      FROM todos
                      WHERE completed_at IS NULL
                      ORDER BY created_at DESC"
@@ -250,17 +261,17 @@ impl Database {
                 }
             }
         }
-        
+
         Ok(todos)
     }
 
     pub fn get_recent_completed_todos(&self, parent_id: Option<i64>, limit: usize) -> anyhow::Result<Vec<Todo>> {
         let mut todos = Vec::new();
-        
+
         match parent_id {
             Some(pid) => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+                    "SELECT id, title, description, created_at, completed_at, due_by, parent_id, hidden
                      FROM todos
                      WHERE parent_id = ?1 AND completed_at IS NOT NULL
                      ORDER BY completed_at DESC
@@ -273,7 +284,7 @@ impl Database {
             },
             None => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+                    "SELECT id, title, description, created_at, completed_at, due_by, parent_id, hidden
                      FROM todos
                      WHERE completed_at IS NOT NULL
                      ORDER BY completed_at DESC
@@ -285,7 +296,7 @@ impl Database {
                 }
             }
         }
-        
+
         Ok(todos)
     }
 
@@ -338,7 +349,7 @@ impl Database {
         // Build case-insensitive regex
         let regex = match RegexBuilder::new(pattern)
             .case_insensitive(true)
-            .build() 
+            .build()
         {
             Ok(regex) => regex,
             Err(_) => {
@@ -351,23 +362,23 @@ impl Database {
 
         // Get all todos from database
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, created_at, completed_at, parent_id, hidden
+            "SELECT id, title, description, created_at, completed_at, due_by, parent_id, hidden
              FROM todos
              ORDER BY created_at DESC"
         )?;
-        
+
         let todo_iter = stmt.query_map([], |row| Todo::from_row(row))?;
-        
+
         let mut matching_todos = Vec::new();
         for todo_result in todo_iter {
             let todo = todo_result?;
-            
+
             // Check if regex matches title or description
             if regex.is_match(&todo.title) || regex.is_match(&todo.description) {
                 matching_todos.push(todo);
             }
         }
-        
+
         Ok(matching_todos)
     }
 }
