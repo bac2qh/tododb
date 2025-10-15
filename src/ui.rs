@@ -103,9 +103,16 @@ impl App {
         let file_path = markdowns_dir.join(&filename);
         
         // Format todo as markdown
+        let due_date_text = if let Some(due_by) = todo.due_by {
+            due_by.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string()
+        } else {
+            "Not set".to_string()
+        };
+
         let markdown_content = format!(
-            "# {}\n\n## Description\n{}\n\n## Metadata\n- **ID:** {}\n- **Status:** {}\n- **Created:** {}\n", 
+            "# {}\n\n## Due Date\n{}\n\n## Description\n{}\n\n## Metadata\n- **ID:** {}\n- **Status:** {}\n- **Created:** {}\n",
             todo.title,
+            due_date_text,
             if todo.description.trim().is_empty() { "(No description)" } else { &todo.description },
             todo.id,
             if todo.is_completed() { "✓ Completed" } else { "○ Incomplete" },
@@ -191,15 +198,21 @@ impl App {
         
         // Read back the edited content and update database
         if let Ok(edited_content) = std::fs::read_to_string(&file_path) {
-            if let Ok((new_title, new_description)) = self.parse_markdown(&edited_content) {
-                if new_title != todo.title || new_description != todo.description {
-                    if let Err(e) = self.database.update_todo(todo.id, new_title, new_description) {
-                        return Err(format!("Failed to update todo: {}", e));
-                    } else {
-                        // Force a checkpoint to ensure changes are written to disk immediately
-                        let _ = self.database.checkpoint();
-                        let _ = self.refresh_todos();
+            match self.parse_markdown(&edited_content) {
+                Ok((new_title, new_description, new_due_date)) => {
+                    if new_title != todo.title || new_description != todo.description || new_due_date != todo.due_by {
+                        if let Err(e) = self.database.update_todo(todo.id, new_title, new_description, new_due_date) {
+                            return Err(format!("Failed to update todo: {}", e));
+                        } else {
+                            // Force a checkpoint to ensure changes are written to disk immediately
+                            let _ = self.database.checkpoint();
+                            let _ = self.refresh_todos();
+                        }
                     }
+                }
+                Err(e) => {
+                    // Show error message to user about parsing failure
+                    return Err(e);
                 }
             }
         }
@@ -207,21 +220,39 @@ impl App {
         Ok(())
     }
     
-    fn parse_markdown(&self, content: &str) -> Result<(String, String), String> {
+    fn parse_markdown(&self, content: &str) -> Result<(String, String, Option<DateTime<Utc>>), String> {
         let lines: Vec<&str> = content.lines().collect();
         let mut title = String::new();
         let mut description = String::new();
-        
+        let mut due_date = None;
+
         let mut in_description = false;
-        
+        let mut in_due_date = false;
+
         for line in lines {
             if line.starts_with("# ") && title.is_empty() {
                 title = line[2..].trim().to_string();
+            } else if line.starts_with("## Due Date") {
+                in_due_date = true;
+                in_description = false;
             } else if line.starts_with("## Description") {
                 in_description = true;
+                in_due_date = false;
             } else if line.starts_with("## Metadata") {
                 // Stop collecting description when we hit the metadata section
                 in_description = false;
+                in_due_date = false;
+            } else if in_due_date && !line.trim().is_empty() {
+                // Parse due date from the line
+                let date_str = line.trim();
+                if date_str != "Not set" {
+                    due_date = Self::parse_due_date(date_str);
+                    // If parsing failed and it wasn't "Not set", return error
+                    if due_date.is_none() {
+                        return Err(format!("Invalid due date format: '{}'. Expected format: 'YYYY-MM-DD HH:MM', '2d', '1w', etc., or 'Not set'", date_str));
+                    }
+                }
+                in_due_date = false; // Only parse first non-empty line
             } else if in_description {
                 // Collect all lines in the description section, including empty lines and headers
                 if !description.is_empty() {
@@ -235,8 +266,8 @@ impl App {
                 }
             }
         }
-        
-        Ok((title, description.trim().to_string()))
+
+        Ok((title, description.trim().to_string(), due_date))
     }
 
     fn parse_due_date(input: &str) -> Option<DateTime<Utc>> {

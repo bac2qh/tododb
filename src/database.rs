@@ -157,10 +157,10 @@ impl Database {
         }
     }
 
-    pub fn update_todo(&self, id: i64, title: String, description: String) -> anyhow::Result<()> {
+    pub fn update_todo(&self, id: i64, title: String, description: String, due_by: Option<DateTime<Utc>>) -> anyhow::Result<()> {
         self.conn.execute(
-            "UPDATE todos SET title = ?1, description = ?2 WHERE id = ?3",
-            params![title, description, id],
+            "UPDATE todos SET title = ?1, description = ?2, due_by = ?3 WHERE id = ?4",
+            params![title, description, due_by, id],
         )?;
         Ok(())
     }
