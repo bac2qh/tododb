@@ -110,7 +110,7 @@ impl App {
         };
 
         let markdown_content = format!(
-            "# {}\n\n## Due Date\n{}\n\n## Description\n{}\n\n## Metadata\n- **ID:** {}\n- **Status:** {}\n- **Created:** {}\n",
+            "# {}\n\n## Due Date\n{}\n\n## Description\n{}\n\n## Metadata\n- **ID:** {}\n- **Status:** {}\n- **Created:** {} UTC\n",
             todo.title,
             due_date_text,
             if todo.description.trim().is_empty() { "(No description)" } else { &todo.description },
